@@ -3,6 +3,9 @@ __pycache__/
 .venv/
 venv/
 env/
-*.log
+
+diagnostic_log.txt
+obd_log.csv
+
 .DS_Store
 Thumbs.db
