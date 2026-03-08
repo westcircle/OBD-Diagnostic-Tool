@@ -1,0 +1,6 @@
+time,message
+[22:11:39],=== OBD 自動接続開始 ===
+[22:11:39],試行中：COM13 / 115200bps
+[22:11:41],接続成功：COM13 / 115200bps
+[22:11:42],FINAL PROTOCOL: ATSP0
+[22:11:45],CSV に保存しました：obd_log.csv
