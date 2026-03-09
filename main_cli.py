@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import csv
 from datetime import datetime
 import msvcrt
 
@@ -43,6 +44,41 @@ def load_json(path, fallback):
     except Exception as e:
         add_log("WARN", f"{path} の読み込みに失敗: {e}")
         return fallback
+
+
+def append_history_csv(
+    diagnosis_datetime,
+    vin,
+    maker,
+    model,
+    year,
+    mileage,
+    dtc_codes,
+    symptom,
+    overall_level,
+):
+    history_file = os.path.join(LOG_DIR, "history.csv")
+    file_exists = os.path.exists(history_file)
+
+    with open(history_file, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(
+                ["日時", "VIN", "メーカー", "車種", "年式", "走行距離", "DTC一覧", "症状", "総合緊急度"]
+            )
+        writer.writerow(
+            [
+                diagnosis_datetime,
+                vin or "",
+                maker or "",
+                model or "",
+                year or "",
+                mileage or "",
+                ", ".join(dtc_codes) if dtc_codes else "",
+                symptom or "",
+                overall_level or "",
+            ]
+        )
 
 
 WMI_TO_MAKER = load_json("wmi_map.json", {})
@@ -149,14 +185,21 @@ def safe_send(ser, command, wait=0.25, retries=1, clear_buffer=True):
             summary = normalize_hex(data)[:220]
             add_log("RECV", summary if summary else "(empty)")
 
-            if "ERROR" in data_u or "UNABLE TO CONNECT" in data_u:
+            if "UNABLE TO CONNECT" in data_u:
+                add_log("ERROR", f"{cmd_text} -> UNABLE TO CONNECT（ECUと通信確立できない）")
+                return data
+            if "ERROR" in data_u:
                 add_log("ERROR", f"{cmd_text} 実行エラー")
                 return data
             if "NO DATA" in data_u:
-                add_log("WARN", f"{cmd_text} -> NO DATA")
+                add_log("WARN", f"{cmd_text} -> NO DATA（ECU応答なし）")
                 return data
 
             if data and ("SEARCHING" in data_u or "BUS INIT" in data_u):
+                if "SEARCHING" in data_u:
+                    add_log("INFO", f"{cmd_text} -> SEARCHING...（プロトコル探索中）")
+                if "BUS INIT" in data_u:
+                    add_log("INFO", f"{cmd_text} -> BUS INIT...（通信初期化中）")
                 extra_rounds = 3 if cmd_text == "0100" else 1
                 for _ in range(extra_rounds):
                     time.sleep(0.25)
@@ -179,10 +222,10 @@ def safe_send(ser, command, wait=0.25, retries=1, clear_buffer=True):
                 add_log("WARN", f"{cmd_text} 応答なし。再試行します ({attempt + 1}/{retries})")
                 time.sleep(0.15)
 
-        add_log("WARN", f"{cmd_text} TIMEOUT")
+        add_log("WARN", f"{cmd_text} -> タイムアウト（応答なし）")
         return ""
     except KeyboardInterrupt:
-        add_log("WARN", f"{cmd_text if 'cmd_text' in locals() else 'CMD'} 中断 (KeyboardInterrupt)")
+        add_log("WARN", f"{cmd_text if 'cmd_text' in locals() else 'CMD'} -> ユーザー中断")
         raise
     except Exception as e:
         add_log("ERROR", f"safe_send 例外: {e}")
@@ -382,16 +425,20 @@ def connect_obd_auto(possible_ports=None):
     def classify_0100(data):
         data_u = (data or "").upper()
         if not data_u.strip():
-            return "タイムアウト"
+            return "timeout", "タイムアウト（ECUから応答がありません）"
         if "UNABLE TO CONNECT" in data_u:
-            return "UNABLE TO CONNECT"
+            return "unable_to_connect", "UNABLE TO CONNECT（ECUと通信確立できません）"
         if "NO DATA" in data_u:
-            return "NO DATA"
+            return "no_data", "NO DATA（ECUから応答がありません）"
+        if "BUS INIT" in data_u:
+            return "bus_init", "BUS INIT...（通信初期化中のまま応答なし）"
+        if "SEARCHING" in data_u and "41 00" not in data_u:
+            return "searching", "SEARCHING...（プロトコル探索中で応答なし）"
         if "OK" in data_u and "41 00" not in data_u:
-            return "0100に対してOKのみ返る（アダプタ応答のみ）"
+            return "adapter_only", "アダプタ応答のみで ECU応答なし（0100 -> OK）"
         if "41 00" in data_u:
-            return "ECU応答あり"
-        return "ATコマンドは通るがECU応答なし"
+            return "ok", "ECU応答あり"
+        return "unknown", "ATコマンドは通るが ECU応答なし"
 
     if possible_ports is None:
         detected_ports = []
@@ -406,7 +453,7 @@ def connect_obd_auto(possible_ports=None):
                 possible_ports.append(p)
 
     LAST_CONNECT_REASON = "接続試行中"
-    add_log("INFO", "ポート接続開始")
+    add_log("INFO", "ポート接続開始（0100でECU応答確認）")
     for port in possible_ports:
         for baud in BAUD_LIST:
             add_log("INFO", f"{port} を試行中... ({baud}bps)")
@@ -429,16 +476,16 @@ def connect_obd_auto(possible_ports=None):
                     add_log("WARN", "アダプタ応答なし（ATDP）")
 
                 check = safe_send(ser, "0100", wait=0.6, retries=1, clear_buffer=True)
-                reason = classify_0100(check)
+                reason_code, reason_text = classify_0100(check)
                 check_u = check.upper()
-                add_log("CHECK", f"0100 -> {normalize_hex(check)[:140] if check else '(empty)'}")
+                add_log("CHECK", f"0100応答: {normalize_hex(check)[:140] if check else '(empty)'}")
 
                 if "41 00" in check_u and "UNABLE TO CONNECT" not in check_u:
                     LAST_CONNECT_REASON = "接続成功"
                     add_log("OK", f"ECU接続成功: {port} / {baud}bps")
                     return ser, port, baud
 
-                add_log("WARN", f"初回判定: {reason}")
+                add_log("WARN", f"0100初回判定[{reason_code}]: {reason_text}")
                 add_log("WARN", "接続確認失敗。再初期化を1回実施")
 
                 init_adapter(ser)
@@ -447,17 +494,17 @@ def connect_obd_auto(possible_ports=None):
                     add_log("INFO", f"再初期化後プロトコル: {normalize_hex(proto2)[:120]}")
 
                 check2 = safe_send(ser, "0100", wait=0.6, retries=1, clear_buffer=True)
-                reason2 = classify_0100(check2)
+                reason2_code, reason2_text = classify_0100(check2)
                 check2_u = check2.upper()
-                add_log("CHECK", f"再試行 0100 -> {normalize_hex(check2)[:140] if check2 else '(empty)'}")
+                add_log("CHECK", f"0100再試行応答: {normalize_hex(check2)[:140] if check2 else '(empty)'}")
 
                 if "41 00" in check2_u and "UNABLE TO CONNECT" not in check2_u:
                     LAST_CONNECT_REASON = "接続成功(再試行)"
                     add_log("OK", f"ECU接続成功(再試行): {port} / {baud}bps")
                     return ser, port, baud
 
-                LAST_CONNECT_REASON = reason2
-                add_log("WARN", f"接続失敗理由: {reason2}")
+                LAST_CONNECT_REASON = reason2_text
+                add_log("WARN", f"接続失敗理由[{reason2_code}]: {reason2_text}")
 
             except KeyboardInterrupt:
                 LAST_CONNECT_REASON = "ユーザー中断"
@@ -469,10 +516,10 @@ def connect_obd_auto(possible_ports=None):
                         pass
                 raise
             except PermissionError as e:
-                LAST_CONNECT_REASON = "COMポートを開けない（使用中 / 権限不足）"
+                LAST_CONNECT_REASON = "COMポートが使用中です（または権限不足）"
                 add_log("ERROR", f"{port} を開けません (使用中/権限): {e}")
             except serial.SerialException as e:
-                LAST_CONNECT_REASON = "COMポートを開けない（使用中 / 権限不足）"
+                LAST_CONNECT_REASON = "COMポートが使用中です（または権限不足）"
                 add_log("WARN", f"{port} 接続失敗: {e}")
             except Exception as e:
                 LAST_CONNECT_REASON = f"例外: {e}"
@@ -597,6 +644,17 @@ def run_obd_diagnosis_flow(ser, cached_vin):
     print("")
     print(report_text)
     saved_path = save_report_text(report_text, result, project_root=BASE_DIR)
+    append_history_csv(
+        diagnosis_datetime=result["diagnosis_datetime"],
+        vin=cached_vin,
+        maker=maker,
+        model=model,
+        year=year,
+        mileage=mileage,
+        dtc_codes=codes,
+        symptom=symptom,
+        overall_level=result.get("overall_level", "不明"),
+    )
     add_log("INFO", "診断完了")
     add_log("INFO", f"総合緊急度: {result.get('overall_level', '不明')}")
     add_log("INFO", f"レポート保存先: {saved_path}")
