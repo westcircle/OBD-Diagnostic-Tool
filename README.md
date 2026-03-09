@@ -125,6 +125,8 @@ python -m unittest tests.test_cli_basic -v
 
 - 診断レポート: `reports/`
 - 実行ログ（主にOBD CLI）: `logs/`
+- セッションログ: `logs/session_YYYYMMDD_HHMMSS.log`
+- ライブデータCSV（任意保存）: `logs/live_YYYYMMDD_HHMMSS.csv`
 - `.pyc` / `__pycache__/` / `logs/` / `reports/` などは `.gitignore` で除外しています
 
 ---
