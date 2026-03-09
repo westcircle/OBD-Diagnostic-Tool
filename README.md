@@ -94,6 +94,26 @@ Windows のコマンドプロンプトや PowerShell で、そのまま実行で
 
 ---
 
+## 基本テストの実行
+
+軽い確認用テストとして `tests/test_cli_basic.py` を用意しています。  
+`unittest`（Python標準ライブラリ）のみを使っているため、追加インストールは不要です。
+
+```bash
+cd /d C:\Users\User\Desktop\car_diagnosis_ai
+python -m unittest tests.test_cli_basic -v
+```
+
+このテストでは、主に以下を確認します。
+- DTC変換
+- VINメーカー判定
+- `normalize_maker_name()`
+- `normalize_symptom_name()`
+- `parse_year_to_western()`
+- `run_multi_diagnosis()`
+
+---
+
 ## 保存先
 
 - 診断レポート: `reports/`
