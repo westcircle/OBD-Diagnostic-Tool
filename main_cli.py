@@ -57,7 +57,7 @@ def append_history_csv(
     dtc_codes,
     symptom,
     overall_level,
-    memo="",
+    vehicle_check_memo="",
 ):
     history_file = os.path.join(LOG_DIR, "history.csv")
     file_exists = os.path.exists(history_file)
@@ -66,7 +66,7 @@ def append_history_csv(
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow(
-                ["日時", "VIN", "メーカー", "車種", "年式", "走行距離", "DTC一覧", "症状", "総合緊急度", "memo"]
+                ["日時", "VIN", "メーカー", "車種", "年式", "走行距離", "DTC一覧", "症状", "総合緊急度", "実車確認メモ"]
             )
         writer.writerow(
             [
@@ -79,7 +79,7 @@ def append_history_csv(
                 ", ".join(dtc_codes) if dtc_codes else "",
                 symptom or "",
                 overall_level or "",
-                memo or "",
+                vehicle_check_memo or "",
             ]
         )
 
@@ -575,15 +575,13 @@ def clear_dtc(ser):
 
 
 def live_basic_pid_mode(ser, interval=1.0):
-    save_csv = input("ライブデータをCSV保存しますか？ [y/N]: ").strip().lower() == "y"
-    live_csv_file = None
-    if save_csv:
-        live_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        live_csv_file = os.path.join(LOG_DIR, f"live_{live_id}.csv")
-        with open(live_csv_file, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["timestamp", "rpm", "ect", "maf", "speed", "iat", "throttle"])
-        add_log("INFO", f"ライブCSV保存先: {live_csv_file}")
+    os.makedirs(LOG_DIR, exist_ok=True)
+    live_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    live_csv_file = os.path.join(LOG_DIR, f"live_{live_id}.csv")
+    with open(live_csv_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "rpm", "ect", "maf", "speed", "iat", "thr"])
+    add_log("INFO", f"ライブCSV保存先: {live_csv_file}")
 
     print("ライブデータ表示を開始します。Enter または Ctrl+C で終了します。")
     add_log("INFO", "ライブデータ表示開始")
@@ -591,20 +589,19 @@ def live_basic_pid_mode(ser, interval=1.0):
         while True:
             pid = read_basic_pid(ser)
             now = datetime.now().strftime("%H:%M:%S")
-            if live_csv_file:
-                with open(live_csv_file, "a", newline="", encoding="utf-8") as f:
-                    writer = csv.writer(f)
-                    writer.writerow(
-                        [
-                            now,
-                            pid["RPM"],
-                            pid["ECT"],
-                            pid["MAF"],
-                            pid["SPEED"],
-                            pid["IAT"],
-                            pid["THROTTLE"],
-                        ]
-                    )
+            with open(live_csv_file, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(
+                    [
+                        now,
+                        pid["RPM"],
+                        pid["ECT"],
+                        pid["MAF"],
+                        pid["SPEED"],
+                        pid["IAT"],
+                        pid["THROTTLE"],
+                    ]
+                )
             print(
                 f"[{now}] "
                 f"RPM:{pid['RPM'] if pid['RPM'] is not None else 'N/A'} "
@@ -671,7 +668,7 @@ def run_obd_diagnosis_flow(ser, cached_vin):
     print("")
     print(report_text)
     saved_path = save_report_text(report_text, result, project_root=BASE_DIR)
-    memo = input("補足メモを入力してください（未入力可）: ").strip()
+    vehicle_check_memo = input("実車確認メモを入力してください（任意）: ").strip()
     append_history_csv(
         diagnosis_datetime=result["diagnosis_datetime"],
         vin=cached_vin,
@@ -682,7 +679,7 @@ def run_obd_diagnosis_flow(ser, cached_vin):
         dtc_codes=codes,
         symptom=symptom,
         overall_level=result.get("overall_level", "不明"),
-        memo=memo,
+        vehicle_check_memo=vehicle_check_memo,
     )
     add_log("INFO", "診断完了")
     add_log("INFO", f"総合緊急度: {result.get('overall_level', '不明')}")

@@ -127,7 +127,12 @@ python -m unittest tests.test_cli_basic -v
 - 実行ログ（主にOBD CLI）: `logs/`
 - セッションログ: `logs/session_YYYYMMDD_HHMMSS.log`
 - ライブデータCSV（任意保存）: `logs/live_YYYYMMDD_HHMMSS.csv`
+- 診断履歴CSV: `logs/history.csv`（実車確認メモも保存）
 - `.pyc` / `__pycache__/` / `logs/` / `reports/` などは `.gitignore` で除外しています
+
+`main_cli.py` を実行すると、操作ログは `logs/session_YYYYMMDD_HHMMSS.log` に保存されます。  
+ライブデータ表示は `logs/live_YYYYMMDD_HHMMSS.csv` に保存でき、OBD診断履歴は `logs/history.csv` に実車確認メモ付きで残せます。  
+接続確認や実車テスト時の記録を残して、あとから見返す用途に使えます。
 
 ---
 
