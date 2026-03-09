@@ -3,7 +3,8 @@
 Pythonで作る初心者向けの車診断支援ツールです。  
 GUIは使わず、CLI（ターミナル）中心で開発しています。
 
-OBD接続でDTC/PIDを読み取り、診断支援結果の表示とレポート保存ができます。
+OBD接続でDTC/PID（車両状態の読み取り値）を読み取り、診断支援結果の表示とレポート保存ができます。  
+OBD機器を使う方法と、手入力で診断する方法の両方に対応しています。
 
 ---
 
@@ -27,7 +28,10 @@ car_diagnosis_ai/
 ├─ maker_notes.py
 ├─ symptom_rules.py
 ├─ report.py
+├─ simulator.py
 ├─ utils.py
+├─ wmi_map.json / vds_map.json / manufacturers.json
+├─ pid_normal.json / dtc_database.json / dtc_merged.json
 ├─ requirements.txt
 ├─ README.md
 ├─ reports/
@@ -44,6 +48,18 @@ car_diagnosis_ai/
   `format_report()` と `save_report_text()` で表示整形と保存を担当します。
 - `dtc_data.py` / `maker_notes.py` / `symptom_rules.py` / `utils.py`  
   DTC辞書、メーカー補足、症状ルール、入力正規化などを担当します。
+- `simulator.py`  
+  テスト補助用（動作確認用）の補助スクリプトです。
+- 各 `json` ファイル  
+  メーカー判定、VIN補助、PID/DTC補助データなどを保持します。
+
+---
+
+## `main.py` の使い方（手入力診断CLI）
+
+1. `python main.py` を実行  
+2. 画面の案内に従って、メーカー / 車種 / 年式 / 走行距離 / DTC / 症状 を入力  
+3. 診断結果が表示され、`reports/` に保存されます
 
 ---
 
@@ -74,12 +90,15 @@ cd /d C:\Users\User\Desktop\car_diagnosis_ai
 python main_cli.py
 ```
 
+Windows のコマンドプロンプトや PowerShell で、そのまま実行できます。
+
 ---
 
 ## 保存先
 
 - 診断レポート: `reports/`
 - 実行ログ（主にOBD CLI）: `logs/`
+- `.pyc` / `__pycache__/` / `logs/` / `reports/` などは `.gitignore` で除外しています
 
 ---
 
@@ -87,3 +106,4 @@ python main_cli.py
 
 - このツールは診断支援用です。最終判断は実車確認・追加点検を前提にしてください。
 - DTC消去は、原因確認と必要な記録を行ってから実施してください。
+- 古い車両やメーカー独自コードでは、追加の整備情報確認が必要になる場合があります。
