@@ -404,7 +404,7 @@ def vin_to_maker(vin):
     if not vin:
         return None
     vin = vin.strip().upper()
-    if len(vin) < 3:
+    if len(vin) != 17:
         return None
     wmi3 = vin[:3]
     if wmi3 in WMI_TO_MAKER:
@@ -431,6 +431,33 @@ def detect_engine_type(vin, maker):
             if len(key) == n and vds.startswith(key):
                 return value
     return "UNKNOWN"
+
+
+def classify_vin_text(vin_text):
+    text = (vin_text or "").strip().upper()
+    if not text:
+        return {
+            "label": "VIN",
+            "value": "未取得",
+            "note": None,
+            "is_full_vin": False,
+            "kind": "missing",
+        }
+    if len(text) == 17:
+        return {
+            "label": "VIN",
+            "value": text,
+            "note": None,
+            "is_full_vin": True,
+            "kind": "full",
+        }
+    return {
+        "label": "VIN候補",
+        "value": text,
+        "note": "17文字未満のため完全VINではない可能性があります",
+        "is_full_vin": False,
+        "kind": "partial",
+    }
 
 
 def normalize_profile_token(text):
@@ -1000,14 +1027,17 @@ def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, l
     pid, raw_map, notes = read_basic_pid(ser, return_details=True)
     dtc_text = "未取得" if last_dtc_codes is None else ("なし" if not last_dtc_codes else ", ".join(last_dtc_codes))
     dtc_pid_hints = build_dtc_pid_hints(last_dtc_codes, pid)
+    vin_info = classify_vin_text(cached_vin)
 
     print("============================================================")
     print("                 OBD2 CLI / 整備士モード")
     print("============================================================")
     print("画面種別 : 基本PID詳細")
     print(f"接続     : {(connected_port if connected_port else '未取得')} / {(connected_baud if connected_baud else '未取得')}")
-    print(f"VIN      : {cached_vin if cached_vin else '未取得'}")
+    print(f"{vin_info['label']:<8}: {vin_info['value']}")
     print(f"DTC      : {dtc_text}")
+    if vin_info["note"]:
+        print(f"補足     : {vin_info['note']}")
     print("============================================================")
     print("")
     print("[現在値]")
@@ -1318,13 +1348,20 @@ def connect_obd_stable_mode():
 
 
 def show_vehicle_info(vin):
-    if not vin:
+    vin_info = classify_vin_text(vin)
+    if vin_info["kind"] == "missing":
         print("車両情報: VIN未取得")
         print("案内: VINは汎用OBD2で取得できない車種もあります。")
         return
     maker = vin_to_maker(vin) or "generic"
+    print(f"{vin_info['label']:<6}: {vin_info['value']}")
+    if vin_info["note"]:
+        print(f"補足    : {vin_info['note']}")
+    if not vin_info["is_full_vin"]:
+        print("メーカー: 判定保留")
+        print("案内: 識別文字列として取得されています。完全VIN取得は再試行してください。")
+        return
     engine = detect_engine_type(vin, maker)
-    print(f"VIN    : {vin}")
     print(f"メーカー: {maker.upper()}")
     print(f"エンジン: {engine}")
     print_vehicle_profile_hint(vin=vin, maker=maker)
@@ -1412,14 +1449,17 @@ def live_basic_pid_mode(
                 os.system("cls" if os.name == "nt" else "clear")
                 dtc_text = "未取得" if last_dtc_codes is None else ("なし" if not last_dtc_codes else ", ".join(last_dtc_codes))
                 dtc_pid_hints = build_dtc_pid_hints(last_dtc_codes, pid)
+                vin_info = classify_vin_text(cached_vin)
                 print("============================================================")
                 print("                 OBD2 CLI / 整備士モード")
                 print("============================================================")
                 print("画面種別 : ライブ詳細")
                 print(f"接続     : {(connected_port if connected_port else '未取得')} / {(connected_baud if connected_baud else '未取得')}")
-                print(f"VIN      : {cached_vin if cached_vin else '未取得'}")
+                print(f"{vin_info['label']:<8}: {vin_info['value']}")
                 print(f"DTC      : {dtc_text}")
                 print(f"更新時刻 : {now}")
+                if vin_info["note"]:
+                    print(f"補足     : {vin_info['note']}")
                 print("============================================================")
                 print("")
                 print("[現在値]")
@@ -1594,7 +1634,7 @@ def print_current_status(ser, connected_port, connected_baud, cached_vin, last_d
     connected = "接続済み" if ser else "未接続"
     port_text = connected_port if connected_port else ("未接続" if not ser else "未取得")
     baud_text = str(connected_baud) if connected_baud else ("未接続" if not ser else "未取得")
-    vin_text = cached_vin if cached_vin else "未取得"
+    vin_info = classify_vin_text(cached_vin)
     profile = get_vehicle_profile(vin=cached_vin)
     if last_dtc_codes is None:
         dtc_text = "未取得"
@@ -1607,7 +1647,9 @@ def print_current_status(ser, connected_port, connected_baud, cached_vin, last_d
     print(f"接続: {connected}")
     print(f"ポート: {port_text}")
     print(f"baud : {baud_text}")
-    print(f"VIN  : {vin_text}")
+    print(f"{vin_info['label']:<5}: {vin_info['value']}")
+    if vin_info["note"]:
+        print(f"補足 : {vin_info['note']}")
     print(f"DTC  : {dtc_text}")
     if profile:
         print(f"参考PF: {profile['title']}")
@@ -1713,7 +1755,11 @@ def main():
                     continue
                 cached_vin = read_vin_stable(ser)
                 if cached_vin:
-                    add_log("OK", f"VIN取得成功: {cached_vin}")
+                    vin_info = classify_vin_text(cached_vin)
+                    if vin_info["is_full_vin"]:
+                        add_log("OK", f"VIN取得成功: {cached_vin}")
+                    else:
+                        add_log("OK", f"VIN候補取得: {cached_vin}")
                     show_vehicle_info(cached_vin)
                 else:
                     add_log("WARN", "VIN取得失敗")
