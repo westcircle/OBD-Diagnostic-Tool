@@ -30,6 +30,7 @@ class TestMainCliBasics(unittest.TestCase):
             main_cli.WMI_TO_MAKER.update({"JT": "toyota", "JTD": "toyota"})
             self.assertEqual(main_cli.vin_to_maker("JTD12345678901234"), "toyota")
             self.assertEqual(main_cli.vin_to_maker("JT123456789012345"), "toyota")
+            self.assertIsNone(main_cli.vin_to_maker("AXZH111000662"))
         finally:
             main_cli.WMI_TO_MAKER.clear()
             main_cli.WMI_TO_MAKER.update(original)
@@ -50,10 +51,57 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertTrue(any("MAF値は未取得" in hint for hint in hints))
         self.assertTrue(any("車速は0km/h" in hint for hint in hints))
 
+    def test_classify_vin_text(self):
+        self.assertTrue(main_cli.classify_vin_text("WVWZZZ1KZBW075339")["is_full_vin"])
+        partial = main_cli.classify_vin_text("AXZH111000662")
+        self.assertEqual(partial["label"], "VIN候補")
+        self.assertIn("17文字未満", partial["note"])
+        missing = main_cli.classify_vin_text("")
+        self.assertEqual(missing["value"], "未取得")
+
     def test_get_vehicle_profile_by_maker(self):
         profile = main_cli.get_vehicle_profile(maker="volkswagen")
         self.assertIsNotNone(profile)
         self.assertIn("VW", profile["title"])
+
+    def test_analyze_live_csv_summary(self):
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", delete=False, newline="", encoding="utf-8", suffix=".csv") as f:
+            f.write("time,rpm,ect,maf,speed,iat,thr\n")
+            f.write("10:00:00,750,55,3.2,0,22,11\n")
+            f.write("10:00:01,780,60,,0,23,12\n")
+            path = f.name
+        try:
+            summary = main_cli.analyze_live_csv(path)
+            self.assertEqual(summary["row_count"], 2)
+            self.assertEqual(summary["rpm"]["min"], 750.0)
+            self.assertEqual(summary["rpm"]["max"], 780.0)
+            self.assertEqual(summary["ect"]["max"], 60.0)
+            self.assertEqual(summary["maf"]["missing"], 1)
+        finally:
+            os.unlink(path)
+
+    def test_build_idle_hint_idle_like(self):
+        hints = main_cli.build_idle_hint(
+            {
+                "rpm": {"avg": 780.0},
+                "speed": {"max": 0.0},
+                "thr": {"avg": 11.0},
+            }
+        )
+        self.assertTrue(any("アイドル中心" in hint for hint in hints))
+
+    def test_build_idle_hint_drive_like(self):
+        hints = main_cli.build_idle_hint(
+            {
+                "rpm": {"avg": 1850.0},
+                "speed": {"max": 38.0},
+                "thr": {"avg": 28.0},
+            }
+        )
+        self.assertTrue(any("走行を含む" in hint for hint in hints))
 
 
 class TestUtilsNormalize(unittest.TestCase):

@@ -4,6 +4,7 @@ import sys
 import time
 import csv
 import re
+import glob
 from datetime import datetime
 import msvcrt
 
@@ -128,6 +129,149 @@ def append_live_csv_row(csv_path: str, row: list) -> bool:
     except Exception as e:
         add_log("WARN", f"ライブCSV追記に失敗: {e}")
         return False
+
+
+def choose_latest_live_csv(log_dir=LOG_DIR):
+    files = sorted(glob.glob(os.path.join(log_dir, "live_*.csv")))
+    return files[-1] if files else None
+
+
+def parse_live_csv_float(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def summarize_live_csv_column(rows, key):
+    values = []
+    missing = 0
+    for row in rows:
+        value = parse_live_csv_float(row.get(key))
+        if value is None:
+            missing += 1
+        else:
+            values.append(value)
+    summary = {"count": len(values), "missing": missing}
+    if values:
+        summary["min"] = min(values)
+        summary["max"] = max(values)
+        summary["avg"] = round(sum(values) / len(values), 2)
+    return summary
+
+
+def build_idle_hint(summary):
+    rpm = summary.get("rpm", {})
+    speed = summary.get("speed", {})
+    thr = summary.get("thr", {})
+
+    speed_max = speed.get("max")
+    rpm_avg = rpm.get("avg")
+    thr_avg = thr.get("avg")
+
+    if speed_max is None and rpm_avg is None:
+        return []
+
+    if speed_max == 0 and (rpm_avg is None or rpm_avg <= 1200) and (thr_avg is None or thr_avg <= 20):
+        return [
+            "参考: この記録はアイドル中心の可能性があります",
+            "参考: 停止中の観察ログとして見やすいです",
+        ]
+
+    if (speed_max is not None and speed_max > 0) or (rpm_avg is not None and rpm_avg > 1500) or (thr_avg is not None and thr_avg > 25):
+        return [
+            "参考: 走行を含む記録の可能性があります",
+            "参考: 純粋なアイドル観察用ログではない可能性があります",
+        ]
+
+    return []
+
+
+def build_live_csv_comments(summary):
+    comments = []
+    rpm = summary.get("rpm", {})
+    ect = summary.get("ect", {})
+    maf = summary.get("maf", {})
+    speed = summary.get("speed", {})
+
+    comments.extend(build_idle_hint(summary))
+
+    if rpm.get("count"):
+        rpm_span = rpm["max"] - rpm["min"]
+        if speed.get("max", 0) == 0 and rpm_span <= 150:
+            comments.append("参考: アイドル時の回転変動は大きすぎないようです")
+        elif speed.get("max", 0) == 0 and rpm_span > 300:
+            comments.append("参考: アイドル時の回転ばらつき確認に使えます。変動はやや大きめです")
+
+    if ect.get("count"):
+        if ect["max"] < 70:
+            comments.append("参考: 水温は暖機途中の可能性があります")
+        elif ect["max"] <= 105:
+            comments.append("参考: 水温の上がり方の確認に使えます")
+        else:
+            comments.append("参考: 水温は高めです。単独では断定できませんが冷却系要確認です")
+
+    if maf.get("count"):
+        if speed.get("max", 0) == 0 and maf.get("avg", 0) <= 10:
+            comments.append("参考: MAFは停止時測定としては大きく外れていない可能性があります")
+    elif maf.get("missing", 0):
+        comments.append("参考: MAFは未取得データが多く、配線や対応状況の確認が必要です")
+
+    missing_columns = [key.upper() for key in ("rpm", "ect", "maf", "speed", "iat", "thr") if summary.get(key, {}).get("missing", 0)]
+    if missing_columns:
+        comments.append("参考: 空欄が多い項目は未取得値として傾向確認に使ってください")
+
+    comments.append("参考値です。単独では故障断定できません")
+    return comments[:5]
+
+
+def analyze_live_csv(csv_path):
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    summary = {
+        "path": csv_path,
+        "row_count": len(rows),
+        "rpm": summarize_live_csv_column(rows, "rpm"),
+        "ect": summarize_live_csv_column(rows, "ect"),
+        "maf": summarize_live_csv_column(rows, "maf"),
+        "speed": summarize_live_csv_column(rows, "speed"),
+        "iat": summarize_live_csv_column(rows, "iat"),
+        "thr": summarize_live_csv_column(rows, "thr"),
+    }
+    summary["comments"] = build_live_csv_comments(summary)
+    return summary
+
+
+def print_live_csv_analysis(summary):
+    def format_min_max_avg(name, column):
+        if not column.get("count"):
+            print(f"{name:<10}: データなし (空欄 {column.get('missing', 0)}件)")
+            return
+        print(
+            f"{name:<10}: 平均 {column['avg']} / 最小 {column['min']} / 最大 {column['max']}"
+            f" (空欄 {column.get('missing', 0)}件)"
+        )
+
+    print("")
+    print("=== ライブCSV後解析 ===")
+    print(f"対象ファイル: {os.path.basename(summary['path'])}")
+    print(f"記録件数    : {summary['row_count']}")
+    print("")
+    format_min_max_avg("RPM", summary["rpm"])
+    format_min_max_avg("ECT", summary["ect"])
+    format_min_max_avg("MAF", summary["maf"])
+    format_min_max_avg("SPEED", summary["speed"])
+    format_min_max_avg("IAT", summary["iat"])
+    format_min_max_avg("THR", summary["thr"])
+    print("")
+    print("簡易コメント:")
+    for line in summary.get("comments", []):
+        print(f"- {line}")
 
 
 WMI_TO_MAKER = load_json("wmi_map.json", {})
@@ -1670,6 +1814,7 @@ def print_menu():
     print("9. 終了")
     print("10. 古い車向け接続安定モード")
     print(f"11. 整備士モード ON/OFF (現在: {'ON' if MECHANIC_MODE else 'OFF'})")
+    print("12. ライブCSV後解析")
 
 
 def main():
@@ -1840,12 +1985,26 @@ def main():
                 add_log("INFO", f"整備士モード {'ON' if MECHANIC_MODE else 'OFF'}")
                 print(f"整備士モードを {'ON' if MECHANIC_MODE else 'OFF'} にしました。")
 
+            elif cmd == "12":
+                latest_csv = choose_latest_live_csv()
+                if not latest_csv:
+                    print("ライブCSVが見つかりませんでした。先にライブデータ表示を実行してください。")
+                    continue
+                try:
+                    summary = analyze_live_csv(latest_csv)
+                    print_live_csv_analysis(summary)
+                except Exception as e:
+                    add_log("WARN", f"ライブCSV後解析に失敗: {e}")
+                    print("ライブCSVの解析に失敗しました。CSV形式を確認してください。")
+                    continue
+                input("Enterでメニューへ戻る")
+
             elif cmd == "9":
                 add_log("INFO", "終了します")
                 break
 
             else:
-                print("不正な入力です。1〜11を選択してください。")
+                print("不正な入力です。1〜12を選択してください。")
     except KeyboardInterrupt:
         LAST_CONNECT_REASON = "ユーザー中断"
         add_log("WARN", "ユーザー操作で終了します")
