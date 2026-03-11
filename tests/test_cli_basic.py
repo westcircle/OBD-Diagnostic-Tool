@@ -14,6 +14,15 @@ class TestMainCliBasics(unittest.TestCase):
         raw = "43 0171 0171 0000 >"
         self.assertEqual(main_cli.parse_dtc_from_43(raw), ["P0171"])
 
+    def test_parse_dtc_from_43_empty_single_4300(self):
+        self.assertEqual(main_cli.parse_dtc_from_43("4300 >"), [])
+
+    def test_parse_dtc_from_43_empty_repeated_4300(self):
+        self.assertEqual(main_cli.parse_dtc_from_43("4300 4300 >"), [])
+
+    def test_parse_dtc_from_43_empty_repeated_spaced_4300(self):
+        self.assertEqual(main_cli.parse_dtc_from_43("43 00 43 00 >"), [])
+
     def test_vin_to_maker_lookup(self):
         original = dict(main_cli.WMI_TO_MAKER)
         try:
@@ -24,6 +33,17 @@ class TestMainCliBasics(unittest.TestCase):
         finally:
             main_cli.WMI_TO_MAKER.clear()
             main_cli.WMI_TO_MAKER.update(original)
+
+    def test_read_vin_stable_with_indexed_multiframe_0902(self):
+        original_safe_send = main_cli.safe_send
+        original_sleep = main_cli.time.sleep
+        try:
+            main_cli.safe_send = lambda *args, **kwargs: "014 0:490201575657 1:5A5A5A314B5A42 2:57303735333339 >"
+            main_cli.time.sleep = lambda *_args, **_kwargs: None
+            self.assertEqual(main_cli.read_vin_stable(None), "WVWZZZ1KZBW075339")
+        finally:
+            main_cli.safe_send = original_safe_send
+            main_cli.time.sleep = original_sleep
 
 
 class TestUtilsNormalize(unittest.TestCase):
