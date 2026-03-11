@@ -127,6 +127,22 @@ class TestMainCliBasics(unittest.TestCase):
         )
         self.assertTrue(any("判定保留" in hint for hint in hints))
 
+    def test_build_missing_column_summary(self):
+        info = main_cli.build_missing_column_summary(
+            {
+                "row_count": 10,
+                "rpm": {"missing": 0},
+                "ect": {"missing": 0},
+                "maf": {"missing": 8},
+                "speed": {"missing": 0},
+                "iat": {"missing": 2},
+                "thr": {"missing": 6},
+            }
+        )
+        self.assertIn("MAF: 空欄 8/10", info["details"])
+        self.assertIn("MAF", info["many_missing"])
+        self.assertIn("THR", info["many_missing"])
+
 
 class TestUtilsNormalize(unittest.TestCase):
     def test_normalize_maker_name(self):

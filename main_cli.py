@@ -220,12 +220,35 @@ def build_warmup_hint(summary):
     return []
 
 
+def build_missing_column_summary(summary):
+    row_count = summary.get("row_count", 0)
+    columns = [
+        ("RPM", "rpm"),
+        ("ECT", "ect"),
+        ("MAF", "maf"),
+        ("SPEED", "speed"),
+        ("IAT", "iat"),
+        ("THR", "thr"),
+    ]
+    details = []
+    many_missing = []
+
+    for label, key in columns:
+        missing = summary.get(key, {}).get("missing", 0)
+        details.append(f"{label}: 空欄 {missing}/{row_count}")
+        if row_count > 0 and missing >= max(2, row_count // 2):
+            many_missing.append(label)
+
+    return {"details": details, "many_missing": many_missing}
+
+
 def build_live_csv_comments(summary):
     comments = []
     rpm = summary.get("rpm", {})
     ect = summary.get("ect", {})
     maf = summary.get("maf", {})
     speed = summary.get("speed", {})
+    missing_info = build_missing_column_summary(summary)
 
     comments.extend(build_idle_hint(summary))
     comments.extend(build_warmup_hint(summary))
@@ -251,8 +274,9 @@ def build_live_csv_comments(summary):
     elif maf.get("missing", 0):
         comments.append("参考: MAFは未取得データが多く、配線や対応状況の確認が必要です")
 
-    missing_columns = [key.upper() for key in ("rpm", "ect", "maf", "speed", "iat", "thr") if summary.get(key, {}).get("missing", 0)]
-    if missing_columns:
+    if missing_info["many_missing"]:
+        comments.append(f"参考: 未取得が多い項目があります ({', '.join(missing_info['many_missing'])})")
+    elif any(summary.get(key, {}).get("missing", 0) for key in ("rpm", "ect", "maf", "speed", "iat", "thr")):
         comments.append("参考: 空欄が多い項目は未取得値として傾向確認に使ってください")
 
     comments.append("参考値です。単独では故障断定できません")
@@ -299,6 +323,16 @@ def print_live_csv_analysis(summary):
     format_min_max_avg("SPEED", summary["speed"])
     format_min_max_avg("IAT", summary["iat"])
     format_min_max_avg("THR", summary["thr"])
+    print("")
+    missing_info = build_missing_column_summary(summary)
+    print("未取得サマリー:")
+    for line in missing_info["details"]:
+        print(f"- {line}")
+    if missing_info["many_missing"]:
+        print(f"- 未取得が多い項目: {', '.join(missing_info['many_missing'])}")
+    else:
+        print("- すべての主要項目で大きな未取得偏りはありません")
+    print("- 一部PIDは車種やECUにより取得できないことがあります")
     print("")
     print("簡易コメント:")
     for line in summary.get("comments", []):
