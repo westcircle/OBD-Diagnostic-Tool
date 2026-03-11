@@ -103,6 +103,30 @@ class TestMainCliBasics(unittest.TestCase):
         )
         self.assertTrue(any("走行を含む" in hint for hint in hints))
 
+    def test_build_warmup_hint_warming_up(self):
+        hints = main_cli.build_warmup_hint(
+            {
+                "ect": {"count": 4, "missing": 0, "min": 42.0, "max": 63.0, "avg": 54.0},
+            }
+        )
+        self.assertTrue(any("暖機途中" in hint for hint in hints))
+
+    def test_build_warmup_hint_warmed(self):
+        hints = main_cli.build_warmup_hint(
+            {
+                "ect": {"count": 4, "missing": 0, "min": 78.0, "max": 86.0, "avg": 82.0},
+            }
+        )
+        self.assertTrue(any("暖機後" in hint for hint in hints))
+
+    def test_build_warmup_hint_missing(self):
+        hints = main_cli.build_warmup_hint(
+            {
+                "ect": {"count": 0, "missing": 5},
+            }
+        )
+        self.assertTrue(any("判定保留" in hint for hint in hints))
+
 
 class TestUtilsNormalize(unittest.TestCase):
     def test_normalize_maker_name(self):

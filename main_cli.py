@@ -190,6 +190,36 @@ def build_idle_hint(summary):
     return []
 
 
+def build_warmup_hint(summary):
+    ect = summary.get("ect", {})
+    ect_count = ect.get("count", 0)
+    ect_missing = ect.get("missing", 0)
+
+    if ect_count == 0:
+        return ["参考: ECT未取得のため暖機状態は判定保留です"]
+
+    if ect_missing > ect_count:
+        return ["参考: ECTの空欄が多いため暖機状態は参考程度に見てください"]
+
+    ect_min = ect.get("min")
+    ect_max = ect.get("max")
+    ect_avg = ect.get("avg")
+
+    if ect_max is None:
+        return []
+
+    if ect_max < 70 or (ect_min is not None and ect_max - ect_min >= 10 and ect_avg is not None and ect_avg < 75):
+        return [
+            "参考: この記録は暖機途中の可能性があります",
+            "参考: 水温の上がり方の確認に使えます",
+        ]
+
+    if 75 <= ect_max <= 105:
+        return ["参考: 暖機後の確認ログとして見られる可能性があります"]
+
+    return []
+
+
 def build_live_csv_comments(summary):
     comments = []
     rpm = summary.get("rpm", {})
@@ -198,6 +228,7 @@ def build_live_csv_comments(summary):
     speed = summary.get("speed", {})
 
     comments.extend(build_idle_hint(summary))
+    comments.extend(build_warmup_hint(summary))
 
     if rpm.get("count"):
         rpm_span = rpm["max"] - rpm["min"]
