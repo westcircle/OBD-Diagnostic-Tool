@@ -45,6 +45,16 @@ class TestMainCliBasics(unittest.TestCase):
             main_cli.safe_send = original_safe_send
             main_cli.time.sleep = original_sleep
 
+    def test_build_dtc_pid_hints_for_maf_and_speed(self):
+        hints = main_cli.build_dtc_pid_hints(["P0102", "P0500"], {"MAF": None, "SPEED": 0})
+        self.assertTrue(any("MAF値は未取得" in hint for hint in hints))
+        self.assertTrue(any("車速は0km/h" in hint for hint in hints))
+
+    def test_get_vehicle_profile_by_maker(self):
+        profile = main_cli.get_vehicle_profile(maker="volkswagen")
+        self.assertIsNotNone(profile)
+        self.assertIn("VW", profile["title"])
+
 
 class TestUtilsNormalize(unittest.TestCase):
     def test_normalize_maker_name(self):

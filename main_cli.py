@@ -43,6 +43,7 @@ BAUD_LIST = [115200, 38400, 9600]
 LAST_CONNECT_REASON = "未実行"
 DEBUG = True
 CONSOLE_LOG_MUTED = False
+MECHANIC_MODE = False
 
 
 def add_log(level, message):
@@ -325,6 +326,24 @@ DTC_KNOWLEDGE = {
         "checks": ["燃料キャップ確認", "EVAPホース確認", "配管漏れ確認"],
         "priority": "低〜中",
     },
+    "P0441": {
+        "name": "EVAPパージ流量異常",
+        "causes": ["パージバルブ固着の可能性", "ホース接続不良の可能性", "制御系異常の可能性"],
+        "checks": ["パージバルブ動作確認", "EVAPホース取り回し確認", "関連配線確認"],
+        "priority": "低〜中",
+    },
+    "P0442": {
+        "name": "EVAP小漏れ検出",
+        "causes": ["燃料キャップ密閉不良の可能性", "細いホース亀裂の可能性", "配管接続緩みの可能性"],
+        "checks": ["燃料キャップ締付確認", "EVAPホースのひび確認", "配管接続部確認"],
+        "priority": "低",
+    },
+    "P0455": {
+        "name": "EVAP大漏れ検出",
+        "causes": ["燃料キャップ外れや緩みの可能性", "EVAP配管外れの可能性", "大きな漏れの可能性"],
+        "checks": ["燃料キャップ状態確認", "EVAP配管外れ確認", "タンク周辺の漏れ確認"],
+        "priority": "低〜中",
+    },
     "P0500": {
         "name": "車速センサ異常",
         "causes": ["車速センサ本体の可能性", "配線の可能性", "コネクタの可能性", "メーター信号の可能性", "ECU入力異常の可能性"],
@@ -344,6 +363,41 @@ DTC_KNOWLEDGE = {
         "priority": "低〜中",
     },
 }
+
+VEHICLE_PROFILES = [
+    {
+        "maker_aliases": ["volkswagen", "vw"],
+        "model_aliases": [],
+        "title": "VW系参考",
+        "note": "SEARCHING後に応答継続する車両や、VIN multi-frame取得に成功する例があります",
+        "connect_hint": "SEARCHING...4100... の継続応答や 0902 multi-frame を確認してください",
+        "recommended": "通常接続で反応が弱い場合も、VIN取得は再試行価値があります",
+    },
+    {
+        "maker_aliases": ["toyota"],
+        "model_aliases": ["セルシオ", "celsior", "ucf21"],
+        "title": "セルシオ参考",
+        "note": "旧車では接続不安定や VIN未取得 が出やすい傾向があります",
+        "connect_hint": "古い車として BUS INIT や応答待ちを想定し、再試行前提で確認してください",
+        "recommended": "VIN未取得でも DTC と基本PID の確認を先に進める運用が無難です",
+    },
+    {
+        "maker_aliases": ["nissan"],
+        "model_aliases": ["キューブ", "cube"],
+        "title": "日産キューブ参考",
+        "note": "比較的安定して接続しやすいサンプルがあります",
+        "connect_hint": "通常接続と基本PID確認から入る流れが使いやすいです",
+        "recommended": "VIN、DTC、基本PID の順で確認すると状況整理しやすいです",
+    },
+    {
+        "maker_aliases": ["mitsubishi", "fuso", "mitsubishi fuso"],
+        "model_aliases": ["キャンター", "canter"],
+        "title": "キャンター参考",
+        "note": "BUS INIT / BUS BUSY 系が出やすく、初期化待ちが長めになることがあります",
+        "connect_hint": "通信初期化系メッセージ時は、時間を置いた再試行や安定モード確認が有効です",
+        "recommended": "ECU応答が弱い場合でも DTC や一部PID が読めるか段階的に確認してください",
+    },
+]
 
 
 def vin_to_maker(vin):
@@ -377,6 +431,38 @@ def detect_engine_type(vin, maker):
             if len(key) == n and vds.startswith(key):
                 return value
     return "UNKNOWN"
+
+
+def normalize_profile_token(text):
+    return (text or "").strip().lower()
+
+
+def get_vehicle_profile(vin=None, maker=None, model=None):
+    maker_norm = normalize_profile_token(maker or vin_to_maker(vin))
+    model_norm = normalize_profile_token(model)
+
+    fallback = None
+    for profile in VEHICLE_PROFILES:
+        maker_aliases = [normalize_profile_token(item) for item in profile.get("maker_aliases", [])]
+        model_aliases = [normalize_profile_token(item) for item in profile.get("model_aliases", [])]
+        maker_match = bool(maker_norm and maker_norm in maker_aliases)
+        model_match = bool(model_norm and any(alias and alias in model_norm for alias in model_aliases))
+        if maker_match and model_match:
+            return profile
+        if maker_match and not model_aliases and fallback is None:
+            fallback = profile
+    return fallback
+
+
+def print_vehicle_profile_hint(vin=None, maker=None, model=None):
+    profile = get_vehicle_profile(vin=vin, maker=maker, model=model)
+    if not profile:
+        return
+    print("")
+    print("参考プロファイル:")
+    print(f"- {profile['title']}")
+    print(f"- 傾向: {profile['note']}")
+    print(f"- 接続時: {profile['connect_hint']}")
 
 
 def normalize_hex(text):
@@ -696,7 +782,7 @@ def read_vin_stable(ser):
     return None
 
 
-def read_basic_pid(ser):
+def read_basic_pid(ser, return_details=False):
     values = {
         "RPM": None,
         "ECT": None,
@@ -705,6 +791,8 @@ def read_basic_pid(ser):
         "IAT": None,
         "THROTTLE": None,
     }
+    raw_map = {}
+    notes = []
 
     def parse_after_header(data, header, count):
         data_norm = normalize_hex(data).upper()
@@ -733,73 +821,160 @@ def read_basic_pid(ser):
 
     for key, command, header, count, decoder in pid_specs:
         raw_value = safe_send(ser, command, wait=0.2, retries=1, clear_buffer=True)
+        raw_norm = normalize_hex(raw_value) if raw_value else ""
+        if return_details:
+            raw_map[key] = raw_norm
         parsed = parse_after_header(raw_value, header, count)
         if parsed is not None:
             try:
                 values[key] = decoder(parsed)
             except Exception:
                 values[key] = None
+        if return_details:
+            raw_upper = raw_norm.upper()
+            header_compact = header.replace(" ", "")
+            raw_compact = raw_upper.replace(" ", "")
+            if not raw_upper:
+                notes.append(f"{key}: 未取得")
+            elif "NO DATA" in raw_upper:
+                notes.append(f"{key}: NO DATA")
+            elif ":" in raw_upper or raw_compact.count(header_compact) >= 2:
+                notes.append(f"{key}: 複数応答あり")
+            elif parsed is None:
+                notes.append(f"{key}: 解析不可")
 
+    if return_details:
+        return values, raw_map, notes
     return values
 
 
-def build_pid_comment_lines(pid):
+def analyze_pid_conditions(pid_values):
     lines = []
 
-    speed = pid.get("SPEED")
+    rpm = pid_values.get("RPM")
+    if rpm is not None:
+        if rpm < 500:
+            lines.append("回転数は低すぎます")
+        elif rpm <= 900:
+            lines.append("回転数はアイドル範囲です")
+        elif rpm <= 2000:
+            lines.append("回転数は軽負荷域です")
+        elif rpm > 3000:
+            lines.append("回転数は高回転です")
+
+    ect = pid_values.get("ECT")
+    if ect is not None:
+        if ect < 40:
+            lines.append("水温は冷間状態です")
+        elif ect <= 70:
+            lines.append("水温は暖機状態です")
+        elif ect <= 105:
+            lines.append("水温は正常範囲です")
+        else:
+            lines.append("水温は高すぎます。オーバーヒートに注意してください")
+
+    iat = pid_values.get("IAT")
+    if iat is not None:
+        if -10 <= iat <= 10:
+            lines.append("吸気温は冬季相当です")
+        elif 10 < iat <= 40:
+            lines.append("吸気温は正常範囲です")
+        elif iat > 50:
+            lines.append("吸気温が高めです")
+
+    speed = pid_values.get("SPEED")
     if speed is not None:
         if speed == 0:
             lines.append("停車中のため車速は 0km/h です")
         elif speed >= 1:
             lines.append("走行中のため車速が出ています")
 
-    ect = pid.get("ECT")
-    if ect is not None:
-        if ect <= 49:
-            lines.append("水温は低めで暖機途中の可能性があります")
-        elif ect <= 89:
-            lines.append("水温は実用範囲です")
-        else:
-            lines.append("水温は高めです。冷却系も確認してください")
-
-    rpm = pid.get("RPM")
-    if rpm is not None:
-        if rpm == 0:
-            lines.append("エンジン停止または取得異常の可能性があります")
-        elif rpm <= 900:
-            lines.append("回転数はアイドル付近です")
-        elif rpm <= 1500:
-            lines.append("回転数はやや高めです")
-        else:
-            lines.append("回転数は高めです")
-
-    maf = pid.get("MAF")
-    if maf is None:
-        lines.append("吸入空気量は未取得です")
-    elif maf <= 2:
-        lines.append("吸入空気量は少なめです")
-    elif maf <= 10:
-        lines.append("吸入空気量は大きな違和感はありません")
-    else:
-        lines.append("吸入空気量はやや多めです")
-
-    throttle = pid.get("THROTTLE")
+    throttle = pid_values.get("THR")
+    if throttle is None:
+        throttle = pid_values.get("THROTTLE")
     if throttle is not None:
         if throttle <= 5:
-            lines.append("スロットルはほぼ閉じています")
-        elif throttle <= 25:
-            lines.append("スロットルは軽く開いています")
+            lines.append("スロットル開度は閉じ気味です")
+        elif throttle <= 15:
+            lines.append("スロットル開度はアイドル範囲です")
+        elif throttle <= 40:
+            lines.append("スロットル開度は軽加速です")
         else:
-            lines.append("スロットル開度はやや大きめです")
+            lines.append("スロットル開度は強加速です")
 
-    iat = pid.get("IAT")
-    if iat is not None:
-        lines.append(f"吸気温の目安は {iat}°C です")
+    maf = pid_values.get("MAF")
+    if maf is None:
+        lines.append("吸入空気量は未取得です")
+    elif maf < 2:
+        lines.append("吸入空気量は低すぎます")
+    elif maf <= 10:
+        lines.append("吸入空気量はアイドル範囲です")
+    elif maf > 100:
+        lines.append("吸入空気量は高負荷域です")
 
     return lines
 
 
-def print_pid_comment_block(pid):
+def build_pid_comment_lines(pid):
+    return analyze_pid_conditions(pid)
+
+
+def build_dtc_pid_hints(dtc_list, pid_values):
+    if not dtc_list or not pid_values:
+        return []
+
+    hints = []
+    codes = {str(code).strip().upper() for code in dtc_list if code}
+    rpm = pid_values.get("RPM")
+    ect = pid_values.get("ECT")
+    iat = pid_values.get("IAT")
+    maf = pid_values.get("MAF")
+    speed = pid_values.get("SPEED")
+    throttle = pid_values.get("THROTTLE")
+
+    if {"P0100", "P0101", "P0102", "P0103"} & codes:
+        if maf is None:
+            hints.append("参考: MAF系DTCがありますが、MAF値は未取得です。配線やセンサー電源も要確認です")
+        elif maf < 2:
+            hints.append("参考: MAF系DTCがあり、吸入空気量は低めです。吸気漏れやセンサー汚れ要確認です")
+        elif maf > 100:
+            hints.append("参考: MAF系DTCがあり、吸入空気量は高めです。信号異常や吸気系要確認です")
+
+    if {"P0110", "P0115", "P0116", "P0117", "P0118"} & codes:
+        if iat is not None and (iat < -20 or iat > 60):
+            hints.append("参考: 温度系DTCがあり、吸気温の値が不自然寄りです。センサー値と配線を要確認です")
+        elif ect is not None and (ect < -20 or ect > 110):
+            hints.append("参考: 温度系DTCがあり、水温の値が不自然寄りです。実温度との差を要確認です")
+
+    if {"P0120", "P0122", "P0123"} & codes:
+        if throttle is None:
+            hints.append("参考: スロットル系DTCがありますが、開度値は未取得です。TPS信号と配線を要確認です")
+        elif throttle < 1 or throttle > 80:
+            hints.append("参考: スロットル系DTCがあり、開度値が偏っています。センサーずれや配線を要確認です")
+
+    if {"P0300", "P0301", "P0302", "P0303", "P0304"} & codes:
+        if rpm is not None and rpm < 900:
+            hints.append("参考: ミスファイア系DTCがあり、現在はアイドル域です。失火再現時の回転変動も要確認です")
+        elif maf is not None and maf < 2:
+            hints.append("参考: ミスファイア系DTCがあり、吸入空気量は少なめです。吸気系や燃料系も要確認です")
+
+    if "P0500" in codes:
+        if speed is None:
+            hints.append("参考: 車速系DTCがありますが、車速PIDは未取得です。信号系と配線を要確認です")
+        elif speed == 0:
+            hints.append("参考: 車速系DTCがあり、現在の車速は0km/hです。走行中にも0固定なら要確認です")
+
+    if "P0420" in codes:
+        hints.append("参考: P0420はPID単独では断定不可です。O2センサー波形や排気漏れ確認が有効です")
+
+    unique_hints = []
+    for hint in hints:
+        if hint not in unique_hints:
+            unique_hints.append(hint)
+    return unique_hints[:3]
+
+
+def print_pid_comment_block(pid, dtc_list=None):
     print("")
     print("=== センサー簡易診断 ===")
     print(f"RPM   : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
@@ -812,6 +987,71 @@ def print_pid_comment_block(pid):
     print("判定:")
     for line in build_pid_comment_lines(pid):
         print(f"- {line}")
+    hint_lines = build_dtc_pid_hints(dtc_list, pid)
+    if hint_lines:
+        print("")
+        print("DTC連動補足:")
+        for line in hint_lines:
+            print(f"- {line}")
+
+
+def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, last_dtc_codes):
+    os.system("cls" if os.name == "nt" else "clear")
+    pid, raw_map, notes = read_basic_pid(ser, return_details=True)
+    dtc_text = "未取得" if last_dtc_codes is None else ("なし" if not last_dtc_codes else ", ".join(last_dtc_codes))
+    dtc_pid_hints = build_dtc_pid_hints(last_dtc_codes, pid)
+
+    print("============================================================")
+    print("                 OBD2 CLI / 整備士モード")
+    print("============================================================")
+    print("画面種別 : 基本PID詳細")
+    print(f"接続     : {(connected_port if connected_port else '未取得')} / {(connected_baud if connected_baud else '未取得')}")
+    print(f"VIN      : {cached_vin if cached_vin else '未取得'}")
+    print(f"DTC      : {dtc_text}")
+    print("============================================================")
+    print("")
+    print("[現在値]")
+    print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
+    print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
+    print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
+    print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
+    print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
+    print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
+    print("")
+    print("[PID RAW応答]")
+    print(format_live_raw_line("010C", raw_map.get("RPM"), "RPM"))
+    print(format_live_raw_line("0105", raw_map.get("ECT"), "ECT"))
+    print(format_live_raw_line("0110", raw_map.get("MAF"), "MAF"))
+    print(format_live_raw_line("010D", raw_map.get("SPEED"), "SPEED"))
+    print(format_live_raw_line("010F", raw_map.get("IAT"), "IAT"))
+    print(format_live_raw_line("0111", raw_map.get("THROTTLE"), "THR"))
+    print("")
+    print("[応答補足]")
+    for note in notes:
+        print(f"- {note}")
+    print("")
+    print("[簡易判定]")
+    for line in build_pid_comment_lines(pid):
+        print(f"- {line}")
+    for line in dtc_pid_hints:
+        print(f"- {line}")
+    print("")
+    print("------------------------------------------------------------")
+    print("Enter: メニューへ戻る")
+    print("------------------------------------------------------------")
+    try:
+        input("")
+    except KeyboardInterrupt:
+        print("")
+
+
+def format_live_raw_line(command, raw_text, label=None):
+    raw_text = raw_text or "(empty)"
+    if len(raw_text) > 72:
+        raw_text = raw_text[:69] + "..."
+    if label:
+        return f"{command} ({label}) -> {raw_text}"
+    return f"{command} -> {raw_text}"
 
 
 def init_adapter(ser):
@@ -1087,6 +1327,7 @@ def show_vehicle_info(vin):
     print(f"VIN    : {vin}")
     print(f"メーカー: {maker.upper()}")
     print(f"エンジン: {engine}")
+    print_vehicle_profile_hint(vin=vin, maker=maker)
 
 
 def read_dtc(ser, maker):
@@ -1118,7 +1359,16 @@ def clear_dtc(ser):
         add_log("WARN", "DTC消去 応答なし")
 
 
-def live_basic_pid_mode(ser, interval=1.0, display_mode="fixed"):
+def live_basic_pid_mode(
+    ser,
+    interval=1.0,
+    display_mode="fixed",
+    mechanic_detail=False,
+    connected_port=None,
+    connected_baud=None,
+    cached_vin=None,
+    last_dtc_codes=None,
+):
     global CONSOLE_LOG_MUTED
     ensure_logs_dir()
     live_csv_file = create_live_csv_path(datetime.now())
@@ -1135,7 +1385,12 @@ def live_basic_pid_mode(ser, interval=1.0, display_mode="fixed"):
         CONSOLE_LOG_MUTED = True
     try:
         while True:
-            pid = read_basic_pid(ser)
+            raw_map = {}
+            notes = []
+            if mechanic_detail:
+                pid, raw_map, notes = read_basic_pid(ser, return_details=True)
+            else:
+                pid = read_basic_pid(ser)
             now = datetime.now().strftime("%H:%M:%S")
             if live_csv_file:
                 append_live_csv_row(
@@ -1153,7 +1408,51 @@ def live_basic_pid_mode(ser, interval=1.0, display_mode="fixed"):
                 last_event = "CSV保存中 / PID取得継続中"
             else:
                 last_event = "PID取得継続中"
-            if display_mode == "fixed":
+            if mechanic_detail:
+                os.system("cls" if os.name == "nt" else "clear")
+                dtc_text = "未取得" if last_dtc_codes is None else ("なし" if not last_dtc_codes else ", ".join(last_dtc_codes))
+                dtc_pid_hints = build_dtc_pid_hints(last_dtc_codes, pid)
+                print("============================================================")
+                print("                 OBD2 CLI / 整備士モード")
+                print("============================================================")
+                print("画面種別 : ライブ詳細")
+                print(f"接続     : {(connected_port if connected_port else '未取得')} / {(connected_baud if connected_baud else '未取得')}")
+                print(f"VIN      : {cached_vin if cached_vin else '未取得'}")
+                print(f"DTC      : {dtc_text}")
+                print(f"更新時刻 : {now}")
+                print("============================================================")
+                print("")
+                print("[現在値]")
+                print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
+                print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
+                print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
+                print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
+                print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
+                print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
+                print("")
+                print("[PID RAW応答]")
+                print(format_live_raw_line("010C", raw_map.get("RPM"), "RPM"))
+                print(format_live_raw_line("0105", raw_map.get("ECT"), "ECT"))
+                print(format_live_raw_line("0110", raw_map.get("MAF"), "MAF"))
+                print(format_live_raw_line("010D", raw_map.get("SPEED"), "SPEED"))
+                print(format_live_raw_line("010F", raw_map.get("IAT"), "IAT"))
+                print(format_live_raw_line("0111", raw_map.get("THROTTLE"), "THR"))
+                print("")
+                print("[応答補足]")
+                for note in notes:
+                    print(f"- {note}")
+                print(f"- CSV: {'保存中' if live_csv_file else 'OFF'} / PID取得継続中")
+                print("")
+                print("[簡易判定]")
+                for line in build_pid_comment_lines(pid):
+                    print(f"- {line}")
+                for line in dtc_pid_hints:
+                    print(f"- {line}")
+                print("")
+                print("------------------------------------------------------------")
+                print(f"Enter: 終了   Ctrl+C: 強制終了   CSV: {'保存中' if live_csv_file else 'OFF'}")
+                print("------------------------------------------------------------")
+            elif display_mode == "fixed":
                 os.system("cls" if os.name == "nt" else "clear")
                 print("=== ライブデータ ===")
                 print(f"RPM   : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
@@ -1296,6 +1595,7 @@ def print_current_status(ser, connected_port, connected_baud, cached_vin, last_d
     port_text = connected_port if connected_port else ("未接続" if not ser else "未取得")
     baud_text = str(connected_baud) if connected_baud else ("未接続" if not ser else "未取得")
     vin_text = cached_vin if cached_vin else "未取得"
+    profile = get_vehicle_profile(vin=cached_vin)
     if last_dtc_codes is None:
         dtc_text = "未取得"
     elif not last_dtc_codes:
@@ -1309,6 +1609,9 @@ def print_current_status(ser, connected_port, connected_baud, cached_vin, last_d
     print(f"baud : {baud_text}")
     print(f"VIN  : {vin_text}")
     print(f"DTC  : {dtc_text}")
+    if profile:
+        print(f"参考PF: {profile['title']}")
+    print(f"整備士モード: {'ON' if MECHANIC_MODE else 'OFF'}")
 
 
 def print_menu():
@@ -1324,10 +1627,11 @@ def print_menu():
     print("8. OBD診断実行")
     print("9. 終了")
     print("10. 古い車向け接続安定モード")
+    print(f"11. 整備士モード ON/OFF (現在: {'ON' if MECHANIC_MODE else 'OFF'})")
 
 
 def main():
-    global LAST_CONNECT_REASON
+    global LAST_CONNECT_REASON, MECHANIC_MODE
     print("OBD2 CLI ツール (軽量/安定重視)")
     print(f"Python {sys.version.split()[0]}")
     add_log("INFO", "セッション開始")
@@ -1440,23 +1744,42 @@ def main():
                     add_log("WARN", "先に OBD接続 を実行してください")
                     continue
                 add_log("INFO", "基本PID表示を実行")
-                pid = read_basic_pid(ser)
-                print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
-                print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
-                print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
-                print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
-                print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
-                print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
-                print_pid_availability_hint(pid)
-                add_log("INFO", "センサー簡易診断を表示")
-                print_pid_comment_block(pid)
+                if MECHANIC_MODE:
+                    add_log("INFO", "整備士モード詳細画面を表示")
+                    print("整備士モード詳細画面を開きます。Enter / Ctrl+C でメニューへ戻ります。")
+                    print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, last_dtc_codes)
+                else:
+                    pid = read_basic_pid(ser)
+                    print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
+                    print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
+                    print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
+                    print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
+                    print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
+                    print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
+                    print_pid_availability_hint(pid)
+                    add_log("INFO", "センサー簡易診断を表示")
+                    print_pid_comment_block(pid, last_dtc_codes)
 
             elif cmd == "7":
                 if not ser:
                     add_log("WARN", "先に OBD接続 を実行してください")
                     continue
-                display_mode = input("ライブ表示モード [F=固定 / l=従来ログ] : ").strip().lower()
-                live_basic_pid_mode(ser, interval=1.0, display_mode="log" if display_mode == "l" else "fixed")
+                if MECHANIC_MODE:
+                    add_log("INFO", "整備士モードライブ詳細画面を表示")
+                    print("整備士モードのライブ詳細画面を開始します。Enter / Ctrl+C で終了します。")
+                    display_mode = "fixed"
+                else:
+                    display_mode = input("ライブ表示モード [F=固定 / l=従来ログ] : ").strip().lower()
+                live_basic_pid_mode(
+                    ser,
+                    interval=1.0,
+                    display_mode="log" if display_mode == "l" else "fixed",
+                    mechanic_detail=MECHANIC_MODE,
+                    connected_port=connected_port,
+                    connected_baud=connected_baud,
+                    cached_vin=cached_vin,
+                    last_dtc_codes=last_dtc_codes,
+                )
 
             elif cmd == "8":
                 if not ser:
@@ -1466,12 +1789,17 @@ def main():
                 if diag_codes is not None:
                     last_dtc_codes = diag_codes
 
+            elif cmd == "11":
+                MECHANIC_MODE = not MECHANIC_MODE
+                add_log("INFO", f"整備士モード {'ON' if MECHANIC_MODE else 'OFF'}")
+                print(f"整備士モードを {'ON' if MECHANIC_MODE else 'OFF'} にしました。")
+
             elif cmd == "9":
                 add_log("INFO", "終了します")
                 break
 
             else:
-                print("不正な入力です。1〜10を選択してください。")
+                print("不正な入力です。1〜11を選択してください。")
     except KeyboardInterrupt:
         LAST_CONNECT_REASON = "ユーザー中断"
         add_log("WARN", "ユーザー操作で終了します")
