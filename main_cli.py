@@ -645,24 +645,47 @@ VEHICLE_PROFILES = [
         "maker_aliases": ["volkswagen", "vw"],
         "model_aliases": [],
         "title": "VW系参考",
-        "note": "SEARCHING後に応答継続する車両や、VIN multi-frame取得に成功する例があります",
+        "note": "VIN multi-frame成功例や、DTCなし判定が通る実車例があります",
         "connect_hint": "SEARCHING...4100... の継続応答や 0902 multi-frame を確認してください",
+        "pid_hint": "一部PIDは NO DATA の場合があります。基本PID中心で確認してください",
         "recommended": "通常接続で反応が弱い場合も、VIN取得は再試行価値があります",
+    },
+    {
+        "maker_aliases": ["lexus"],
+        "model_aliases": ["es", "es300h", "es300", "axzh", "axzh11"],
+        "title": "レクサスES / HV系参考",
+        "note": "接続は比較的良好で、COM13 / 115200 で安定した実車例があります",
+        "connect_hint": "PID取得や DTCなし判定は通常手順で確認しやすい傾向があります",
+        "vin_hint": "短い識別文字列が取れる場合があります。その場合は VIN候補 として扱ってください",
+        "pid_hint": "ハイブリッド系ではアイドル値や THR を通常ガソリン車の感覚で断定しないでください",
+        "recommended": "停止時ログでも HV制御の影響があるため、単独値より全体傾向を見てください",
+    },
+    {
+        "maker_aliases": ["toyota", "lexus"],
+        "model_aliases": ["hybrid", "hv", "プリウス", "prius", "カムリ", "camry", "axvh", "axuh", "axzh"],
+        "title": "トヨタ / レクサスHV系参考",
+        "note": "接続自体は比較的安定でも、エンジン停止制御で見え方が変わる場合があります",
+        "connect_hint": "基本PID取得はしやすい一方、停止中でも値の解釈は慎重に見てください",
+        "vin_hint": "17文字VINではなく短い識別文字列として返る場合があります",
+        "pid_hint": "ハイブリッド系ではアイドル回転やスロットル値を単純比較しないでください",
+        "recommended": "VIN候補表示やログ全体の傾向を併せて判断する使い方が無難です",
     },
     {
         "maker_aliases": ["toyota"],
         "model_aliases": ["セルシオ", "celsior", "ucf21"],
         "title": "セルシオ参考",
-        "note": "旧車では接続不安定や VIN未取得 が出やすい傾向があります",
-        "connect_hint": "古い車として BUS INIT や応答待ちを想定し、再試行前提で確認してください",
+        "note": "古い車両では接続不安定で、VIN未取得がありうる傾向があります",
+        "connect_hint": "SEARCHING...4100... や UNABLE TO CONNECT が混在する前提で再試行してください",
+        "vin_hint": "VINが取れなくても異常ではありません。DTCと基本PIDを先に確認してください",
         "recommended": "VIN未取得でも DTC と基本PID の確認を先に進める運用が無難です",
     },
     {
         "maker_aliases": ["nissan"],
         "model_aliases": ["キューブ", "cube"],
         "title": "日産キューブ参考",
-        "note": "比較的安定して接続しやすいサンプルがあります",
+        "note": "比較的安定して接続しやすく、ライブ表示も取りやすい実車例があります",
         "connect_hint": "通常接続と基本PID確認から入る流れが使いやすいです",
+        "pid_hint": "PIDやライブ表示がきれいに取りやすい傾向があります",
         "recommended": "VIN、DTC、基本PID の順で確認すると状況整理しやすいです",
     },
     {
@@ -766,6 +789,10 @@ def print_vehicle_profile_hint(vin=None, maker=None, model=None):
     print(f"- {profile['title']}")
     print(f"- 傾向: {profile['note']}")
     print(f"- 接続時: {profile['connect_hint']}")
+    if profile.get("vin_hint"):
+        print(f"- VIN補足: {profile['vin_hint']}")
+    if profile.get("pid_hint"):
+        print(f"- 取得補足: {profile['pid_hint']}")
 
 
 def normalize_hex(text):

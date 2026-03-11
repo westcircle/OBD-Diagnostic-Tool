@@ -64,6 +64,18 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertIsNotNone(profile)
         self.assertIn("VW", profile["title"])
 
+    def test_get_vehicle_profile_lexus_es_hybrid(self):
+        profile = main_cli.get_vehicle_profile(maker="lexus", model="ES300h")
+        self.assertIsNotNone(profile)
+        self.assertIn("レクサスES", profile["title"])
+        self.assertIn("VIN候補", profile["vin_hint"])
+
+    def test_get_vehicle_profile_ucf21_celsior(self):
+        profile = main_cli.get_vehicle_profile(maker="toyota", model="UCF21 セルシオ")
+        self.assertIsNotNone(profile)
+        self.assertIn("セルシオ", profile["title"])
+        self.assertIn("UNABLE TO CONNECT", profile["connect_hint"])
+
     def test_analyze_live_csv_summary(self):
         import os
         import tempfile
