@@ -242,6 +242,68 @@ def build_missing_column_summary(summary):
     return {"details": details, "many_missing": many_missing}
 
 
+def classify_live_log_type(summary):
+    speed = summary.get("speed", {})
+    rpm = summary.get("rpm", {})
+    thr = summary.get("thr", {})
+
+    speed_count = speed.get("count", 0)
+    speed_max = speed.get("max")
+
+    if speed_count < 2 or speed_max is None:
+        return {
+            "label": "判定保留",
+            "hint": "参考: SPEED未取得または有効データが少ないため、記録タイプは保留です",
+        }
+
+    row_count = max(summary.get("row_count", 0), speed_count)
+    moving_count = 0
+    stop_count = 0
+
+    if row_count > 0:
+        moving_count = int(round(speed_count * speed.get("avg", 0) / max(speed_max, 1)))
+        moving_count = max(0, min(moving_count, speed_count))
+        stop_count = speed_count - moving_count
+
+    moving_ratio = moving_count / speed_count if speed_count else 0
+    stop_ratio = stop_count / speed_count if speed_count else 0
+
+    if speed_max == 0:
+        return {
+            "label": "停止中心ログ",
+            "hint": "参考: 停止中の観察に向いたログです",
+        }
+
+    if moving_count == 0 and speed_max <= 1:
+        return {
+            "label": "停止中心ログ",
+            "hint": "参考: ほぼ停止中の観察に向いたログです",
+        }
+
+    if stop_ratio >= 0.2 and moving_ratio >= 0.2 and moving_ratio < 0.7 and speed_max < 40:
+        return {
+            "label": "混在ログ",
+            "hint": "参考: 停止と走行が混ざったログの可能性があります",
+        }
+
+    if moving_ratio >= 0.7 or speed_max >= 40:
+        return {
+            "label": "走行ありログ",
+            "hint": "参考: 走行を含むため、アイドル観察専用ではありません",
+        }
+
+    if speed_max <= 3 and (rpm.get("avg") is None or rpm.get("avg") <= 1200) and (thr.get("avg") is None or thr.get("avg") <= 20):
+        return {
+            "label": "停止中心ログ",
+            "hint": "参考: 停止中心の可能性があります。低速移動が少し混ざる場合もあります",
+        }
+
+    return {
+        "label": "判定保留",
+        "hint": "参考: 停止と走行の比率が読み切れず、記録タイプは参考保留です",
+    }
+
+
 def build_live_csv_comments(summary):
     comments = []
     rpm = summary.get("rpm", {})
@@ -249,7 +311,10 @@ def build_live_csv_comments(summary):
     maf = summary.get("maf", {})
     speed = summary.get("speed", {})
     missing_info = build_missing_column_summary(summary)
+    log_type = summary.get("log_type") or classify_live_log_type(summary)
 
+    comments.append(f"記録タイプ参考: {log_type['label']}")
+    comments.append(log_type["hint"])
     comments.extend(build_idle_hint(summary))
     comments.extend(build_warmup_hint(summary))
 
@@ -298,6 +363,7 @@ def analyze_live_csv(csv_path):
         "iat": summarize_live_csv_column(rows, "iat"),
         "thr": summarize_live_csv_column(rows, "thr"),
     }
+    summary["log_type"] = classify_live_log_type(summary)
     summary["comments"] = build_live_csv_comments(summary)
     return summary
 
@@ -316,6 +382,7 @@ def print_live_csv_analysis(summary):
     print("=== ライブCSV後解析 ===")
     print(f"対象ファイル: {os.path.basename(summary['path'])}")
     print(f"記録件数    : {summary['row_count']}")
+    print(f"記録タイプ  : {summary.get('log_type', {}).get('label', '判定保留')}")
     print("")
     format_min_max_avg("RPM", summary["rpm"])
     format_min_max_avg("ECT", summary["ect"])

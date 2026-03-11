@@ -143,6 +143,50 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertIn("MAF", info["many_missing"])
         self.assertIn("THR", info["many_missing"])
 
+    def test_classify_live_log_type_stopped(self):
+        result = main_cli.classify_live_log_type(
+            {
+                "row_count": 4,
+                "speed": {"count": 4, "max": 0.0, "avg": 0.0},
+                "rpm": {"avg": 780.0},
+                "thr": {"avg": 11.0},
+            }
+        )
+        self.assertEqual(result["label"], "停止中心ログ")
+
+    def test_classify_live_log_type_driving(self):
+        result = main_cli.classify_live_log_type(
+            {
+                "row_count": 4,
+                "speed": {"count": 4, "max": 40.0, "avg": 30.0},
+                "rpm": {"avg": 1800.0},
+                "thr": {"avg": 24.0},
+            }
+        )
+        self.assertEqual(result["label"], "走行ありログ")
+
+    def test_classify_live_log_type_mixed(self):
+        result = main_cli.classify_live_log_type(
+            {
+                "row_count": 4,
+                "speed": {"count": 4, "max": 30.0, "avg": 15.0},
+                "rpm": {"avg": 1200.0},
+                "thr": {"avg": 15.0},
+            }
+        )
+        self.assertEqual(result["label"], "混在ログ")
+
+    def test_classify_live_log_type_pending(self):
+        result = main_cli.classify_live_log_type(
+            {
+                "row_count": 4,
+                "speed": {"count": 0, "missing": 4},
+                "rpm": {"avg": 900.0},
+                "thr": {"avg": 12.0},
+            }
+        )
+        self.assertEqual(result["label"], "判定保留")
+
 
 class TestUtilsNormalize(unittest.TestCase):
     def test_normalize_maker_name(self):
