@@ -1076,8 +1076,12 @@ def read_basic_pid(ser, return_details=False):
                 notes.append(f"{key}: NO DATA")
             elif ":" in raw_upper or raw_compact.count(header_compact) >= 2:
                 notes.append(f"{key}: 複数応答あり")
+            elif parsed is not None:
+                notes.append(f"{key}: 単一応答")
+            elif raw_upper in {"OK", "SEARCHING"}:
+                notes.append(f"{key}: アダプタ応答のみ")
             elif parsed is None:
-                notes.append(f"{key}: 解析不可")
+                notes.append(f"{key}: 要確認")
 
     if return_details:
         return values, raw_map, notes
@@ -1231,6 +1235,15 @@ def print_pid_comment_block(pid, dtc_list=None):
             print(f"- {line}")
 
 
+def format_pid_value(value):
+    if value is None:
+        return "未取得"
+    if isinstance(value, float):
+        text = f"{value:.2f}".rstrip("0").rstrip(".")
+        return text
+    return str(value)
+
+
 def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, last_dtc_codes):
     os.system("cls" if os.name == "nt" else "clear")
     pid, raw_map, notes = read_basic_pid(ser, return_details=True)
@@ -1250,12 +1263,16 @@ def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, l
     print("============================================================")
     print("")
     print("[現在値]")
-    print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
-    print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
-    print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
-    print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
-    print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
-    print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
+    print(f"RPM        : {format_pid_value(pid['RPM'])}")
+    print(f"ECT        : {format_pid_value(pid['ECT'])}")
+    print(f"MAF        : {format_pid_value(pid['MAF'])}")
+    print(f"SPEED      : {format_pid_value(pid['SPEED'])}")
+    print(f"IAT        : {format_pid_value(pid['IAT'])}")
+    print(f"THROTTLE   : {format_pid_value(pid['THROTTLE'])}")
+    print("")
+    print("[取得状態]")
+    for note in notes:
+        print(f"- {note}")
     print("")
     print("[PID RAW応答]")
     print(format_live_raw_line("010C", raw_map.get("RPM"), "RPM"))
@@ -1266,13 +1283,13 @@ def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, l
     print(format_live_raw_line("0111", raw_map.get("THROTTLE"), "THR"))
     print("")
     print("[応答補足]")
-    for note in notes:
-        print(f"- {note}")
+    if not dtc_pid_hints:
+        print("- DTC連動補足はありません")
+    for line in dtc_pid_hints:
+        print(f"- {line}")
     print("")
     print("[簡易判定]")
     for line in build_pid_comment_lines(pid):
-        print(f"- {line}")
-    for line in dtc_pid_hints:
         print(f"- {line}")
     print("")
     print("------------------------------------------------------------")
@@ -1285,11 +1302,11 @@ def print_mechanic_pid_screen(ser, connected_port, connected_baud, cached_vin, l
 
 
 def format_live_raw_line(command, raw_text, label=None):
-    raw_text = raw_text or "(empty)"
+    raw_text = raw_text or "未取得"
     if len(raw_text) > 72:
         raw_text = raw_text[:69] + "..."
     if label:
-        return f"{command} ({label}) -> {raw_text}"
+        return f"{f'{command} ({label})':<16} -> {raw_text}"
     return f"{command} -> {raw_text}"
 
 
@@ -1672,12 +1689,16 @@ def live_basic_pid_mode(
                 print("============================================================")
                 print("")
                 print("[現在値]")
-                print(f"RPM        : {pid['RPM'] if pid['RPM'] is not None else 'N/A'}")
-                print(f"ECT        : {pid['ECT'] if pid['ECT'] is not None else 'N/A'}")
-                print(f"MAF        : {pid['MAF'] if pid['MAF'] is not None else 'N/A'}")
-                print(f"SPEED      : {pid['SPEED'] if pid['SPEED'] is not None else 'N/A'}")
-                print(f"IAT        : {pid['IAT'] if pid['IAT'] is not None else 'N/A'}")
-                print(f"THROTTLE   : {pid['THROTTLE'] if pid['THROTTLE'] is not None else 'N/A'}")
+                print(f"RPM        : {format_pid_value(pid['RPM'])}")
+                print(f"ECT        : {format_pid_value(pid['ECT'])}")
+                print(f"MAF        : {format_pid_value(pid['MAF'])}")
+                print(f"SPEED      : {format_pid_value(pid['SPEED'])}")
+                print(f"IAT        : {format_pid_value(pid['IAT'])}")
+                print(f"THROTTLE   : {format_pid_value(pid['THROTTLE'])}")
+                print("")
+                print("[取得状態]")
+                for note in notes:
+                    print(f"- {note}")
                 print("")
                 print("[PID RAW応答]")
                 print(format_live_raw_line("010C", raw_map.get("RPM"), "RPM"))
@@ -1688,14 +1709,13 @@ def live_basic_pid_mode(
                 print(format_live_raw_line("0111", raw_map.get("THROTTLE"), "THR"))
                 print("")
                 print("[応答補足]")
-                for note in notes:
-                    print(f"- {note}")
+                for line in dtc_pid_hints:
+                    print(f"- {line}")
                 print(f"- CSV: {'保存中' if live_csv_file else 'OFF'} / PID取得継続中")
-                print("")
+                if not dtc_pid_hints and not vin_info["note"]:
+                    print("- 追加補足はありません")
                 print("[簡易判定]")
                 for line in build_pid_comment_lines(pid):
-                    print(f"- {line}")
-                for line in dtc_pid_hints:
                     print(f"- {line}")
                 print("")
                 print("------------------------------------------------------------")
