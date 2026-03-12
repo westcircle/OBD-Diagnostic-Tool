@@ -369,3 +369,52 @@ def build_dtc_pid_hints(dtc_list, pid_values):
         if hint not in unique_hints:
             unique_hints.append(hint)
     return unique_hints[:4]
+
+
+def annotate_failure_candidates(dtc_code, failure_candidates, dtc_pid_hints=None):
+    candidates = [str(candidate).strip() for candidate in (failure_candidates or []) if str(candidate).strip()]
+    if not candidates:
+        return []
+
+    hint_text = " ".join(str(hint) for hint in (dtc_pid_hints or [])).upper()
+    normalized_code = str(dtc_code or "").strip().upper()
+
+    def has_any(*keywords):
+        return any(keyword.upper() in hint_text for keyword in keywords)
+
+    def build_suffix(candidate):
+        if normalized_code == "P0171":
+            if "吸気漏れ" in candidate and has_any("吸気", "燃調", "二次エア"):
+                return "（燃調/吸気系ヒントあり）"
+            if "MAF" in candidate and has_any("MAF", "エアフロ"):
+                return "（PID傾向から参考優先）"
+            if "燃圧" in candidate and has_any("燃料", "燃圧"):
+                return "（燃料系ヒントあり）"
+        elif normalized_code == "P0300":
+            if "点火" in candidate and has_any("ミスファイア", "点火"):
+                return "（失火系ヒントあり）"
+            if "燃料" in candidate and has_any("燃料", "燃圧"):
+                return "（燃料系ヒントあり）"
+            if "吸気" in candidate and has_any("吸気", "二次エア"):
+                return "（吸気系ヒントあり）"
+        elif normalized_code == "P0420":
+            if "O2" in candidate and has_any("O2", "A/F"):
+                return "（O2系ヒントあり）"
+            if "排気漏れ" in candidate and has_any("排気漏れ", "排気"):
+                return "（排気系ヒントあり）"
+        elif normalized_code == "P0100":
+            if "MAF" in candidate and has_any("MAF", "エアフロ"):
+                return "（MAF系ヒントあり）"
+        elif normalized_code == "P0110":
+            if ("IAT" in candidate or "吸気温" in candidate) and has_any("IAT", "吸気温"):
+                return "（吸気温系ヒントあり）"
+        elif normalized_code == "P0120":
+            if ("TPS" in candidate or "スロットル" in candidate) and has_any("THROTTLE", "TPS", "開度"):
+                return "（開度系ヒントあり）"
+        return ""
+
+    lines = []
+    for index, candidate in enumerate(candidates, start=1):
+        suffix = build_suffix(candidate)
+        lines.append(f"{index}. {candidate}{suffix}")
+    return lines

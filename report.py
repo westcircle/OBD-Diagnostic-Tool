@@ -5,6 +5,7 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+from diagnostic_comments import annotate_failure_candidates
 from dtc_data import get_dtc_failure_candidates
 
 
@@ -172,23 +173,26 @@ def _format_list(title: str, items: list) -> str:
     return "\n".join(lines)
 
 
-def _format_failure_candidates(dtc_code: str) -> str:
+def _format_failure_candidates(dtc_code: str, dtc_pid_hints: list[str] | None = None) -> str:
     candidates = get_dtc_failure_candidates(dtc_code)
     if not candidates:
         return ""
 
     lines = ["[故障候補]", "- 参考候補です。優先確認の当たりとして見てください"]
-    for index, candidate in enumerate(candidates[:3], start=1):
-        lines.append(f"- {index}. {candidate}")
+    for line in annotate_failure_candidates(dtc_code, candidates[:3], dtc_pid_hints=dtc_pid_hints):
+        lines.append(f"- {line}")
     return "\n".join(lines)
 
 
-def _format_single_diagnosis_block(result: dict) -> str:
+def _format_single_diagnosis_block(result: dict, dtc_pid_hints: list[str] | None = None) -> str:
     lines = []
     lines.append(f"DTC: {result['dtc_code']}")
     lines.append("コード説明")
     lines.append(result["dtc_title"])
-    failure_candidates_text = _format_failure_candidates(result["dtc_code"])
+    diagnosis_hints = result.get("dtc_pid_hints")
+    if diagnosis_hints is None:
+        diagnosis_hints = dtc_pid_hints
+    failure_candidates_text = _format_failure_candidates(result["dtc_code"], dtc_pid_hints=diagnosis_hints)
     if failure_candidates_text:
         lines.append("")
         lines.append(failure_candidates_text)
@@ -206,6 +210,7 @@ def _format_single_diagnosis_block(result: dict) -> str:
 def format_report(result: dict) -> str:
     """診断結果を表示用の文字列にする"""
     overall_notes = result.get("overall_reference_notes", [])
+    root_dtc_pid_hints = result.get("dtc_pid_hints")
 
     # 既存の単一結果フォーマットとの互換も維持
     if "diagnoses" not in result:
@@ -220,7 +225,7 @@ def format_report(result: dict) -> str:
         lines.append(f"症状: {result['symptom']}")
         lines.append(f"総合緊急度: {result.get('overall_level', '不明')}")
         lines.append("")
-        lines.append(_format_single_diagnosis_block(result))
+        lines.append(_format_single_diagnosis_block(result, dtc_pid_hints=root_dtc_pid_hints))
         if overall_notes:
             lines.append("")
             lines.append("[総合参考メモ]")
@@ -245,7 +250,10 @@ def format_report(result: dict) -> str:
     for diagnosis in diagnoses:
         lines.append("")
         lines.append("-" * 40)
-        lines.append(_format_single_diagnosis_block(diagnosis))
+        diagnosis_hints = diagnosis.get("dtc_pid_hints")
+        if diagnosis_hints is None and len(diagnoses) == 1:
+            diagnosis_hints = root_dtc_pid_hints
+        lines.append(_format_single_diagnosis_block(diagnosis, dtc_pid_hints=diagnosis_hints))
 
     if overall_notes:
         lines.append("")

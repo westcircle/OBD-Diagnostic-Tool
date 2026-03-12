@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
+import diagnostic_comments
 import dtc_data
 from diagnosis import run_multi_diagnosis
 import main_cli
@@ -441,6 +442,47 @@ class TestMainCliBasics(unittest.TestCase):
         report_text = main_cli.format_report(result)
         self.assertIn("[故障候補]", report_text)
         self.assertIn("1. 吸気漏れ", report_text)
+
+    def test_annotate_failure_candidates_keeps_default_when_hints_are_missing(self):
+        lines = diagnostic_comments.annotate_failure_candidates(
+            "P0171",
+            ["吸気漏れ", "MAFセンサー汚れ・劣化", "燃圧低下"],
+            dtc_pid_hints=[],
+        )
+        self.assertEqual(lines[0], "1. 吸気漏れ")
+        self.assertEqual(lines[1], "2. MAFセンサー汚れ・劣化")
+
+    def test_annotate_failure_candidates_adds_hint_for_p0171(self):
+        lines = diagnostic_comments.annotate_failure_candidates(
+            "P0171",
+            ["吸気漏れ", "MAFセンサー汚れ・劣化", "燃圧低下"],
+            dtc_pid_hints=["参考: P0171で低開度かつMAF低めです。吸気側の二次エアやエアフロ汚れも要確認です"],
+        )
+        self.assertTrue(any("参考優先" in line or "吸気系ヒントあり" in line for line in lines))
+
+    def test_annotate_failure_candidates_does_not_add_unrelated_hint(self):
+        lines = diagnostic_comments.annotate_failure_candidates(
+            "P0420",
+            ["触媒劣化", "O2センサー劣化", "排気漏れ"],
+            dtc_pid_hints=["参考: 車速系DTCがありますが、車速PIDは未取得です。信号系と配線を要確認です"],
+        )
+        self.assertEqual(lines[0], "1. 触媒劣化")
+        self.assertEqual(lines[1], "2. O2センサー劣化")
+
+    def test_format_report_includes_failure_candidate_annotation_when_hints_exist(self):
+        result = run_multi_diagnosis(
+            maker="トヨタ",
+            model="テスト車",
+            year="1999",
+            mileage="100000",
+            dtc_codes=["P0171"],
+            symptom="燃費悪化",
+        )
+        result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+        result["dtc_pid_hints"] = ["参考: P0171で低開度かつMAF低めです。吸気側の二次エアやエアフロ汚れも要確認です"]
+        report_text = main_cli.format_report(result)
+        self.assertIn("[故障候補]", report_text)
+        self.assertTrue("PID傾向から参考優先" in report_text or "燃調/吸気系ヒントあり" in report_text)
 
     def test_append_diagnosis_history_csv_creates_header_and_row(self):
         with TemporaryDirectory() as tmpdir:
