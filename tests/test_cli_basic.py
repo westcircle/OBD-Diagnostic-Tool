@@ -248,7 +248,9 @@ class TestMainCliBasics(unittest.TestCase):
                 "thr": {"count": 6, "missing": 0, "avg": 10.0},
             }
         )
+        self.assertIsInstance(comments, list)
         self.assertTrue(any("RPMのばらつき" in comment for comment in comments))
+        self.assertTrue(any(comment.startswith("[中]") for comment in comments))
 
     def test_build_live_anomaly_comments_ect_extremes(self):
         low_comments = main_cli.build_live_anomaly_comments(
@@ -277,6 +279,7 @@ class TestMainCliBasics(unittest.TestCase):
         )
         self.assertTrue(any("暖機途中" in comment for comment in low_comments))
         self.assertTrue(any("ECTが高め" in comment for comment in high_comments))
+        self.assertTrue(any(comment.startswith("[弱]") for comment in low_comments))
 
     def test_build_live_anomaly_comments_many_missing(self):
         comments = main_cli.build_live_anomaly_comments(
@@ -292,6 +295,7 @@ class TestMainCliBasics(unittest.TestCase):
             }
         )
         self.assertTrue(any("未取得が多い項目" in comment for comment in comments))
+        self.assertTrue(any(comment.startswith("[弱]") for comment in comments))
         self.assertLessEqual(len(comments), 5)
 
     def test_build_live_anomaly_comments_without_profile_keeps_default_thresholds(self):
