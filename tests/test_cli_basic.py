@@ -8,6 +8,7 @@ import diagnostic_comments
 import dtc_data
 from diagnosis import run_multi_diagnosis
 import main_cli
+import report
 from utils import normalize_maker_name, normalize_symptom_name, parse_year_to_western
 
 
@@ -426,6 +427,39 @@ class TestMainCliBasics(unittest.TestCase):
     def test_get_dtc_failure_candidates_returns_empty_for_unknown_code(self):
         self.assertEqual(dtc_data.get_dtc_failure_candidates("P9999"), [])
 
+    def test_get_dtc_failure_candidate_items_supports_new_object_format(self):
+        items = dtc_data.get_dtc_failure_candidate_items(
+            "P0171",
+            failure_map={
+                "P0171": {
+                    "candidates": [
+                        {"name": "吸気漏れ", "check": "ホースまわりを確認"},
+                        {"name": "MAFセンサー汚れ・劣化", "check": "コネクタを確認"},
+                    ]
+                }
+            },
+        )
+        self.assertEqual(
+            items,
+            [
+                {"name": "吸気漏れ", "check": "ホースまわりを確認"},
+                {"name": "MAFセンサー汚れ・劣化", "check": "コネクタを確認"},
+            ],
+        )
+
+    def test_get_dtc_failure_candidate_items_supports_legacy_string_format(self):
+        items = dtc_data.get_dtc_failure_candidate_items(
+            "P0171",
+            failure_map={"P0171": {"candidates": ["吸気漏れ", "燃圧低下"]}},
+        )
+        self.assertEqual(
+            items,
+            [
+                {"name": "吸気漏れ", "check": ""},
+                {"name": "燃圧低下", "check": ""},
+            ],
+        )
+
     def test_load_dtc_failure_map_returns_empty_when_file_is_missing(self):
         self.assertEqual(dtc_data.load_dtc_failure_map(path="C:\\not_found_dtc_failure_map.json"), {})
 
@@ -443,10 +477,59 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertIn("[故障候補]", report_text)
         self.assertIn("1. 吸気漏れ", report_text)
 
+    def test_format_report_includes_failure_candidate_check_points(self):
+        result = run_multi_diagnosis(
+            maker="トヨタ",
+            model="テスト車",
+            year="1999",
+            mileage="100000",
+            dtc_codes=["P0171"],
+            symptom="燃費悪化",
+        )
+        result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+        report_text = main_cli.format_report(result)
+        self.assertIn("確認ポイント:", report_text)
+        self.assertIn("ホース、PCV、インマニ周辺", report_text)
+
+    def test_format_report_keeps_candidate_display_when_check_is_missing(self):
+        original_get_items = report.get_dtc_failure_candidate_items
+        try:
+            report.get_dtc_failure_candidate_items = lambda *_args, **_kwargs: [
+                {"name": "吸気漏れ", "check": ""},
+                {"name": "MAFセンサー汚れ・劣化", "check": "センサー汚れを確認"},
+            ]
+            result = run_multi_diagnosis(
+                maker="トヨタ",
+                model="テスト車",
+                year="1999",
+                mileage="100000",
+                dtc_codes=["P0171"],
+                symptom="燃費悪化",
+            )
+            result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+            report_text = main_cli.format_report(result)
+        finally:
+            report.get_dtc_failure_candidate_items = original_get_items
+
+        self.assertIn("1. 吸気漏れ", report_text)
+        self.assertIn("2. MAFセンサー汚れ・劣化", report_text)
+
     def test_annotate_failure_candidates_keeps_default_when_hints_are_missing(self):
         lines = diagnostic_comments.annotate_failure_candidates(
             "P0171",
             ["吸気漏れ", "MAFセンサー汚れ・劣化", "燃圧低下"],
+            dtc_pid_hints=[],
+        )
+        self.assertEqual(lines[0], "1. 吸気漏れ")
+        self.assertEqual(lines[1], "2. MAFセンサー汚れ・劣化")
+
+    def test_annotate_failure_candidates_supports_dict_items(self):
+        lines = diagnostic_comments.annotate_failure_candidates(
+            "P0171",
+            [
+                {"name": "吸気漏れ", "check": "ホースまわりを確認"},
+                {"name": "MAFセンサー汚れ・劣化", "check": "コネクタを確認"},
+            ],
             dtc_pid_hints=[],
         )
         self.assertEqual(lines[0], "1. 吸気漏れ")
@@ -483,6 +566,7 @@ class TestMainCliBasics(unittest.TestCase):
         report_text = main_cli.format_report(result)
         self.assertIn("[故障候補]", report_text)
         self.assertTrue("PID傾向から参考優先" in report_text or "燃調/吸気系ヒントあり" in report_text)
+        self.assertNotIn("{'name':", report_text)
 
     def test_append_diagnosis_history_csv_creates_header_and_row(self):
         with TemporaryDirectory() as tmpdir:

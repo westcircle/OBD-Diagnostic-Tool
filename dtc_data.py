@@ -92,7 +92,30 @@ def load_dtc_failure_map(path: str | Path | None = None) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def get_dtc_failure_candidates(code: str, limit: int = 3, failure_map: dict | None = None, path: str | Path | None = None) -> list[str]:
+def _normalize_failure_candidate_item(candidate) -> dict | None:
+    if isinstance(candidate, str):
+        name = candidate.strip()
+        if not name:
+            return None
+        return {"name": name, "check": ""}
+
+    if not isinstance(candidate, dict):
+        return None
+
+    name = str(candidate.get("name", "")).strip()
+    if not name:
+        return None
+
+    check = str(candidate.get("check", "")).strip()
+    return {"name": name, "check": check}
+
+
+def get_dtc_failure_candidate_items(
+    code: str,
+    limit: int = 3,
+    failure_map: dict | None = None,
+    path: str | Path | None = None,
+) -> list[dict[str, str]]:
     normalized = str(code or "").strip().upper()
     if not normalized:
         return []
@@ -106,5 +129,15 @@ def get_dtc_failure_candidates(code: str, limit: int = 3, failure_map: dict | No
     if not isinstance(candidates, list):
         return []
 
-    cleaned = [str(candidate).strip() for candidate in candidates if str(candidate).strip()]
+    cleaned = []
+    for candidate in candidates:
+        normalized_item = _normalize_failure_candidate_item(candidate)
+        if normalized_item:
+            cleaned.append(normalized_item)
+
     return cleaned[: max(limit, 0)]
+
+
+def get_dtc_failure_candidates(code: str, limit: int = 3, failure_map: dict | None = None, path: str | Path | None = None) -> list[str]:
+    items = get_dtc_failure_candidate_items(code, limit=limit, failure_map=failure_map, path=path)
+    return [item["name"] for item in items if item.get("name")]

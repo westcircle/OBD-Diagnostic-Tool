@@ -371,8 +371,21 @@ def build_dtc_pid_hints(dtc_list, pid_values):
     return unique_hints[:4]
 
 
+def _normalize_failure_candidate_name(candidate):
+    if isinstance(candidate, dict):
+        name = candidate.get("name", "")
+    else:
+        name = candidate
+    normalized = str(name).strip()
+    return normalized if normalized else ""
+
+
 def annotate_failure_candidates(dtc_code, failure_candidates, dtc_pid_hints=None):
-    candidates = [str(candidate).strip() for candidate in (failure_candidates or []) if str(candidate).strip()]
+    candidates = []
+    for candidate in failure_candidates or []:
+        candidate_name = _normalize_failure_candidate_name(candidate)
+        if candidate_name:
+            candidates.append(candidate_name)
     if not candidates:
         return []
 

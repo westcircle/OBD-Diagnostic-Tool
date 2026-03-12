@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from diagnostic_comments import annotate_failure_candidates
-from dtc_data import get_dtc_failure_candidates
+from dtc_data import get_dtc_failure_candidate_items
 
 
 def _sanitize_filename_part(text: str, fallback: str, max_length: int = 20) -> str:
@@ -174,13 +174,17 @@ def _format_list(title: str, items: list) -> str:
 
 
 def _format_failure_candidates(dtc_code: str, dtc_pid_hints: list[str] | None = None) -> str:
-    candidates = get_dtc_failure_candidates(dtc_code)
-    if not candidates:
+    candidate_items = get_dtc_failure_candidate_items(dtc_code)
+    if not candidate_items:
         return ""
 
     lines = ["[故障候補]", "- 参考候補です。優先確認の当たりとして見てください"]
-    for line in annotate_failure_candidates(dtc_code, candidates[:3], dtc_pid_hints=dtc_pid_hints):
+    annotated_lines = annotate_failure_candidates(dtc_code, candidate_items[:3], dtc_pid_hints=dtc_pid_hints)
+    for item, line in zip(candidate_items[:3], annotated_lines):
         lines.append(f"- {line}")
+        check = str(item.get("check", "")).strip()
+        if check:
+            lines.append(f"  確認ポイント: {check}")
     return "\n".join(lines)
 
 
