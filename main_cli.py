@@ -104,6 +104,76 @@ def append_history_csv(
         )
 
 
+def load_history_rows(history_path=None):
+    history_file = history_path or os.path.join(LOG_DIR, "history.csv")
+    if not os.path.exists(history_file):
+        return []
+    try:
+        with open(history_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            return list(reader)
+    except Exception as e:
+        add_log("WARN", f"history.csv の読み込みに失敗: {e}")
+        return []
+
+
+def build_dtc_history_hints(dtc_list, history_path=None):
+    codes = []
+    seen = set()
+    for code in dtc_list or []:
+        normalized = (code or "").strip().upper()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            codes.append(normalized)
+
+    if not codes:
+        return []
+
+    rows = load_history_rows(history_path=history_path)
+    if not rows:
+        return []
+
+    stats = {code: {"count": 0, "last_seen": None, "recent": False} for code in codes}
+    for row in rows:
+        dtc_text = str(row.get("DTC一覧", "") or row.get("dtc_codes", "")).upper()
+        if not dtc_text.strip():
+            continue
+        row_codes = {item.strip().upper() for item in dtc_text.split(",") if item.strip()}
+        if not row_codes:
+            continue
+        row_date = str(row.get("日時", "") or row.get("date", "")).strip()
+        for code in codes:
+            if code in row_codes:
+                stats[code]["count"] += 1
+                stats[code]["last_seen"] = row_date or "日時不明"
+
+    if rows:
+        latest_text = str(rows[-1].get("DTC一覧", "") or rows[-1].get("dtc_codes", "")).upper()
+        latest_codes = {item.strip().upper() for item in latest_text.split(",") if item.strip()}
+        for code in codes:
+            if code in latest_codes:
+                stats[code]["recent"] = True
+
+    matched_codes = [code for code in codes if stats[code]["count"] > 0]
+    if not matched_codes:
+        return []
+
+    hints = []
+    for code in matched_codes[:3]:
+        count = stats[code]["count"]
+        if count >= 2:
+            hints.append(f"参考: {code} は過去 {count} 回記録があります")
+        else:
+            hints.append(f"参考: {code} は過去にも記録があります")
+        if stats[code]["recent"]:
+            hints.append(f"参考: 前回履歴にも {code} があります")
+        elif stats[code]["last_seen"]:
+            hints.append(f"参考: {code} の前回記録は {stats[code]['last_seen']} です")
+
+    hints.append("参考: 再発傾向の確認に使えます。単独では故障断定できません")
+    return hints[:5]
+
+
 def create_live_csv_path(started_at: datetime) -> str:
     live_id = started_at.strftime("%Y-%m-%d_%H%M%S")
     return os.path.join(LOG_DIR, f"live_{live_id}.csv")
@@ -1254,10 +1324,13 @@ def build_pid_comment_lines(pid):
 
 
 def build_dtc_pid_hints(dtc_list, pid_values):
-    if not dtc_list or not pid_values:
+    if not dtc_list:
         return []
+    if pid_values is None:
+        pid_values = {}
 
     hints = []
+    missing_keys = [key for key in ("RPM", "ECT", "MAF", "SPEED", "IAT", "THROTTLE") if pid_values.get(key) is None]
     codes = {str(code).strip().upper() for code in dtc_list if code}
     rpm = pid_values.get("RPM")
     ect = pid_values.get("ECT")
@@ -1266,46 +1339,78 @@ def build_dtc_pid_hints(dtc_list, pid_values):
     speed = pid_values.get("SPEED")
     throttle = pid_values.get("THROTTLE")
 
+    def add_hint(text):
+        if text and text not in hints:
+            hints.append(text)
+
+    if "P0171" in codes:
+        if maf is not None and throttle is not None and throttle <= 15 and maf <= 4:
+            add_hint("参考: P0171で低開度かつMAF低めです。吸気側の二次エアやエアフロ汚れも要確認です")
+        elif iat is not None and (iat < -20 or iat > 60):
+            add_hint("参考: P0171で吸気温の値が不自然寄りです。吸気温センサー系も参考確認してください")
+
     if {"P0100", "P0101", "P0102", "P0103"} & codes:
         if maf is None:
-            hints.append("参考: MAF系DTCがありますが、MAF値は未取得です。配線やセンサー電源も要確認です")
+            add_hint("参考: MAF系DTCがありますが、MAF値は未取得です。配線やセンサー電源も要確認です")
         elif maf < 2:
-            hints.append("参考: MAF系DTCがあり、吸入空気量は低めです。吸気漏れやセンサー汚れ要確認です")
+            add_hint("参考: MAF系DTCがあり、吸入空気量は低めです。吸気漏れやセンサー汚れ要確認です")
         elif maf > 100:
-            hints.append("参考: MAF系DTCがあり、吸入空気量は高めです。信号異常や吸気系要確認です")
+            add_hint("参考: MAF系DTCがあり、吸入空気量は高めです。信号異常や吸気系要確認です")
 
     if {"P0110", "P0115", "P0116", "P0117", "P0118"} & codes:
         if iat is not None and (iat < -20 or iat > 60):
-            hints.append("参考: 温度系DTCがあり、吸気温の値が不自然寄りです。センサー値と配線を要確認です")
+            add_hint("参考: 温度系DTCがあり、吸気温の値が不自然寄りです。センサー値と配線を要確認です")
         elif ect is not None and (ect < -20 or ect > 110):
-            hints.append("参考: 温度系DTCがあり、水温の値が不自然寄りです。実温度との差を要確認です")
+            add_hint("参考: 温度系DTCがあり、水温の値が不自然寄りです。実温度との差を要確認です")
 
     if {"P0120", "P0122", "P0123"} & codes:
         if throttle is None:
-            hints.append("参考: スロットル系DTCがありますが、開度値は未取得です。TPS信号と配線を要確認です")
+            add_hint("参考: スロットル系DTCがありますが、開度値は未取得です。TPS信号と配線を要確認です")
         elif throttle < 1 or throttle > 80:
-            hints.append("参考: スロットル系DTCがあり、開度値が偏っています。センサーずれや配線を要確認です")
+            add_hint("参考: スロットル系DTCがあり、開度値が偏っています。センサーずれや配線を要確認です")
 
     if {"P0300", "P0301", "P0302", "P0303", "P0304"} & codes:
-        if rpm is not None and rpm < 900:
-            hints.append("参考: ミスファイア系DTCがあり、現在はアイドル域です。失火再現時の回転変動も要確認です")
+        if rpm is not None and rpm < 900 and throttle is not None and throttle <= 15:
+            add_hint("参考: ミスファイア系DTCがあり、現在はアイドル域です。点火系や燃調ばらつきも要確認です")
         elif maf is not None and maf < 2:
-            hints.append("参考: ミスファイア系DTCがあり、吸入空気量は少なめです。吸気系や燃料系も要確認です")
+            add_hint("参考: ミスファイア系DTCがあり、吸入空気量は少なめです。吸気系や燃料系も要確認です")
 
     if "P0500" in codes:
         if speed is None:
-            hints.append("参考: 車速系DTCがありますが、車速PIDは未取得です。信号系と配線を要確認です")
+            add_hint("参考: 車速系DTCがありますが、車速PIDは未取得です。信号系と配線を要確認です")
         elif speed == 0:
-            hints.append("参考: 車速系DTCがあり、現在の車速は0km/hです。走行中にも0固定なら要確認です")
+            add_hint("参考: 車速系DTCがあり、現在の車速は0km/hです。走行中にも0固定なら要確認です")
 
     if "P0420" in codes:
-        hints.append("参考: P0420はPID単独では断定不可です。O2センサー波形や排気漏れ確認が有効です")
+        if ect is not None and ect >= 75:
+            add_hint("参考: P0420があり、現在は暖機後の可能性があります。触媒効率やO2系も要確認です")
+        else:
+            add_hint("参考: P0420はPID単独では断定不可です。O2センサー波形や排気漏れ確認が有効です")
+
+    if {"P0135", "P0141"} & codes:
+        if ect is not None and ect < 70:
+            add_hint("参考: O2ヒーター系DTCがあり、まだ暖機途中寄りです。ヒーター回路や配線も要確認です")
+        else:
+            add_hint("参考: O2ヒーター系DTCです。冷間始動時の再現性や配線状態も参考確認してください")
+
+    if "P0401" in codes:
+        if ect is not None and ect >= 75:
+            add_hint("参考: P0401が暖機後にも出る場合、EGR通路詰まりや制御不足も参考確認してください")
+
+    if "P0440" in codes:
+        add_hint("参考: P0440は蒸発ガス系DTCです。フューエルキャップや配管も要確認です")
+
+    if "B2797" in codes:
+        add_hint("参考: B2797はイモビ系や認証系の確認対象です。エンジンPIDだけでは判断しにくいため別系統も要確認です")
+
+    if len(missing_keys) >= 4 and hints:
+        add_hint("参考: PID取得が限定的なため、上記コメントは参考範囲で確認してください")
 
     unique_hints = []
     for hint in hints:
         if hint not in unique_hints:
             unique_hints.append(hint)
-    return unique_hints[:3]
+    return unique_hints[:4]
 
 
 def print_pid_comment_block(pid, dtc_list=None):
@@ -1704,6 +1809,8 @@ def read_dtc(ser, maker):
     print("補足: generic DTC（主に P0xxx）を優先して表示します。")
     for c in codes:
         print(" -", dtc_desc(c, maker))
+    for line in build_dtc_history_hints(codes):
+        print(line)
     print_dtc_knowledge_block(codes)
     return codes
 

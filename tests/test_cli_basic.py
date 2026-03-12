@@ -51,6 +51,42 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertTrue(any("MAF値は未取得" in hint for hint in hints))
         self.assertTrue(any("車速は0km/h" in hint for hint in hints))
 
+    def test_build_dtc_pid_hints_empty_when_no_dtc(self):
+        hints = main_cli.build_dtc_pid_hints([], {"MAF": 3.0, "SPEED": 0})
+        self.assertEqual(hints, [])
+
+    def test_build_dtc_pid_hints_for_p0171_low_maf(self):
+        hints = main_cli.build_dtc_pid_hints(
+            ["P0171"],
+            {"RPM": 780, "ECT": 82, "MAF": 3.5, "SPEED": 0, "IAT": 18, "THROTTLE": 8},
+        )
+        self.assertTrue(any("二次エア" in hint or "エアフロ汚れ" in hint for hint in hints))
+
+    def test_build_dtc_pid_hints_for_p0500_speed_missing(self):
+        hints = main_cli.build_dtc_pid_hints(
+            ["P0500"],
+            {"RPM": 900, "ECT": 80, "MAF": 4.0, "SPEED": None, "IAT": 20, "THROTTLE": 9},
+        )
+        self.assertTrue(any("車速PIDは未取得" in hint for hint in hints))
+
+    def test_build_dtc_pid_hints_for_b2797(self):
+        hints = main_cli.build_dtc_pid_hints(
+            ["B2797"],
+            {"RPM": None, "ECT": None, "MAF": None, "SPEED": None, "IAT": None, "THROTTLE": None},
+        )
+        self.assertTrue(any("イモビ系" in hint or "認証系" in hint for hint in hints))
+
+    def test_build_dtc_pid_hints_for_b2797_with_empty_pid_dict(self):
+        hints = main_cli.build_dtc_pid_hints(["B2797"], {})
+        self.assertNotEqual(hints, [])
+
+    def test_build_dtc_pid_hints_with_many_missing_pids(self):
+        hints = main_cli.build_dtc_pid_hints(
+            ["P0500", "B2797"],
+            {"RPM": None, "ECT": None, "MAF": None, "SPEED": None, "IAT": None, "THROTTLE": 10},
+        )
+        self.assertTrue(any("PID取得が限定的" in hint for hint in hints))
+
     def test_classify_vin_text(self):
         self.assertTrue(main_cli.classify_vin_text("WVWZZZ1KZBW075339")["is_full_vin"])
         partial = main_cli.classify_vin_text("AXZH111000662")
@@ -198,6 +234,40 @@ class TestMainCliBasics(unittest.TestCase):
             }
         )
         self.assertEqual(result["label"], "判定保留")
+
+    def test_build_dtc_history_hints_with_matches(self):
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", delete=False, newline="", encoding="utf-8", suffix=".csv") as f:
+            f.write("日時,VIN,メーカー,車種,年式,走行距離,DTC一覧,症状,総合緊急度,実車確認メモ\n")
+            f.write("2026-03-10 10:00:00,,toyota,,, ,P0420,燃費悪化,中,\n")
+            f.write("2026-03-11 11:00:00,,toyota,,, ,P0420,燃費悪化,中,\n")
+            path = f.name
+        try:
+            hints = main_cli.build_dtc_history_hints(["P0420"], history_path=path)
+            self.assertTrue(any("過去 2 回" in hint for hint in hints))
+            self.assertTrue(any("前回履歴" in hint for hint in hints))
+        finally:
+            os.unlink(path)
+
+    def test_build_dtc_history_hints_without_history_file(self):
+        hints = main_cli.build_dtc_history_hints(["P0420"], history_path="C:\\not_found_history.csv")
+        self.assertEqual(hints, [])
+
+    def test_build_dtc_history_hints_without_matches(self):
+        import os
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", delete=False, newline="", encoding="utf-8", suffix=".csv") as f:
+            f.write("日時,VIN,メーカー,車種,年式,走行距離,DTC一覧,症状,総合緊急度,実車確認メモ\n")
+            f.write("2026-03-10 10:00:00,,toyota,,, ,P0171,燃費悪化,中,\n")
+            path = f.name
+        try:
+            hints = main_cli.build_dtc_history_hints(["P0420"], history_path=path)
+            self.assertEqual(hints, [])
+        finally:
+            os.unlink(path)
 
 
 class TestUtilsNormalize(unittest.TestCase):
