@@ -86,18 +86,37 @@ def summarize_dtc_counts(rows: list[dict[str, str]]) -> list[tuple[str, int]]:
 
 
 def summarize_recurring_dtc_details(rows: list[dict[str, str]]) -> list[dict[str, str | int]]:
-    stats: dict[str, dict[str, str | int]] = {}
+    stats: dict[str, dict[str, str | int | set[str]]] = {}
     for row in rows:
         diagnosis_datetime = str(row.get("diagnosis_datetime", "") or "").strip()
+        vin = str(row.get("vin", "") or "").strip()
         for code in split_dtc_codes(row.get("dtc_codes", "")):
             if code not in stats:
-                stats[code] = {"code": code, "count": 0, "last_seen": ""}
+                stats[code] = {
+                    "code": code,
+                    "count": 0,
+                    "vin_set": set(),
+                    "last_seen": "",
+                }
             stats[code]["count"] = int(stats[code]["count"]) + 1
+            if vin:
+                stats[code]["vin_set"].add(vin)
             current_last_seen = str(stats[code].get("last_seen", "") or "")
             if diagnosis_datetime and diagnosis_datetime > current_last_seen:
                 stats[code]["last_seen"] = diagnosis_datetime
 
-    recurring = [item for item in stats.values() if int(item["count"]) >= 2]
+    recurring = []
+    for item in stats.values():
+        if int(item["count"]) < 2:
+            continue
+        recurring.append(
+            {
+                "code": str(item["code"]),
+                "count": int(item["count"]),
+                "vin_count": len(item["vin_set"]),
+                "last_seen": str(item.get("last_seen", "") or ""),
+            }
+        )
     return sorted(recurring, key=lambda item: (-int(item["count"]), str(item["code"])))
 
 
@@ -108,10 +127,13 @@ def summarize_recurring_dtc_counts(rows: list[dict[str, str]]) -> list[tuple[str
 def format_recurring_dtc_line(item: dict[str, str | int]) -> str:
     code = str(item.get("code", "") or "")
     count = int(item.get("count", 0) or 0)
+    vin_count = int(item.get("vin_count", 0) or 0)
     last_seen = str(item.get("last_seen", "") or "").strip()
+
+    text = f"- {code}: {count}（VIN件数: {vin_count}）"
     if last_seen:
-        return f"- {code}: {count}（最新: {last_seen}）"
-    return f"- {code}: {count}"
+        text += f"（最新: {last_seen}）"
+    return text
 
 
 def build_row_line(row: dict[str, str]) -> str:

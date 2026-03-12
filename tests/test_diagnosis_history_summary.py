@@ -53,19 +53,17 @@ class TestDiagnosisHistorySummary(unittest.TestCase):
         self.assertEqual(counts["P0171"], 2)
         self.assertEqual(counts["P0420"], 1)
 
-    def test_summarize_recurring_dtc_details_returns_count_and_last_seen(self):
+    def test_summarize_recurring_dtc_details_returns_count_vin_count_and_last_seen(self):
         rows = [
-            {"diagnosis_datetime": "2026-03-10 10:00:00", "dtc_codes": "P0171"},
-            {"diagnosis_datetime": "2026-03-12 10:00:00", "dtc_codes": "P0171"},
-            {"diagnosis_datetime": "2026-03-11 09:00:00", "dtc_codes": "P0300"},
-            {"diagnosis_datetime": "2026-03-09 09:00:00", "dtc_codes": "P0300"},
+            {"diagnosis_datetime": "2026-03-10 10:00:00", "vin": "VIN1", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "2026-03-12 10:00:00", "vin": "VIN1", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "2026-03-11 09:00:00", "vin": "VIN2", "dtc_codes": "P0171"},
         ]
         recurring = diagnosis_history_summary.summarize_recurring_dtc_details(rows)
         self.assertEqual(
             recurring,
             [
-                {"code": "P0171", "count": 2, "last_seen": "2026-03-12 10:00:00"},
-                {"code": "P0300", "count": 2, "last_seen": "2026-03-11 09:00:00"},
+                {"code": "P0171", "count": 3, "vin_count": 2, "last_seen": "2026-03-12 10:00:00"},
             ],
         )
 
@@ -89,11 +87,20 @@ class TestDiagnosisHistorySummary(unittest.TestCase):
 
     def test_summarize_recurring_dtc_details_ignores_empty_datetime(self):
         rows = [
-            {"diagnosis_datetime": "", "dtc_codes": "P0171"},
-            {"diagnosis_datetime": "2026-03-12 10:00:00", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "", "vin": "VIN1", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "2026-03-12 10:00:00", "vin": "VIN1", "dtc_codes": "P0171"},
         ]
         recurring = diagnosis_history_summary.summarize_recurring_dtc_details(rows)
         self.assertEqual(recurring[0]["last_seen"], "2026-03-12 10:00:00")
+
+    def test_summarize_recurring_dtc_details_ignores_empty_vin_for_vin_count(self):
+        rows = [
+            {"diagnosis_datetime": "2026-03-10 10:00:00", "vin": "", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "2026-03-12 10:00:00", "vin": "VIN1", "dtc_codes": "P0171"},
+            {"diagnosis_datetime": "2026-03-11 10:00:00", "vin": "", "dtc_codes": "P0171"},
+        ]
+        recurring = diagnosis_history_summary.summarize_recurring_dtc_details(rows)
+        self.assertEqual(recurring[0]["vin_count"], 1)
 
     def test_filter_rows_by_dtc(self):
         rows = [
@@ -215,6 +222,7 @@ class TestDiagnosisHistorySummary(unittest.TestCase):
             text = output.getvalue()
             self.assertIn("総件数: 3", text)
             self.assertIn("再発上位DTC:", text)
+            self.assertIn("VIN件数:", text)
             self.assertIn("最新:", text)
             self.assertEqual(text.count("- 日時:"), 2)
 
@@ -302,7 +310,7 @@ class TestDiagnosisHistorySummary(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.getvalue()
             self.assertIn("再発上位DTC:", text)
-            self.assertIn("- P0171: 2（最新: 2026-03-12 10:00:00）", text)
+            self.assertIn("- P0171: 2（VIN件数: 2）（最新: 2026-03-12 10:00:00）", text)
             self.assertNotIn("直近履歴:", text)
 
 
