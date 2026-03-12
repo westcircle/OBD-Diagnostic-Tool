@@ -12,7 +12,7 @@ import serial
 from serial.tools import list_ports
 
 from diagnosis import run_multi_diagnosis
-from report import format_report, save_report_text
+from report import append_diagnosis_history_csv, format_report, save_report_text
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -2183,6 +2183,11 @@ def run_obd_diagnosis_flow(ser, cached_vin):
     print("")
     print(report_text)
     saved_path = save_report_text(report_text, result, project_root=BASE_DIR)
+    diagnosis_history_path = append_diagnosis_history_csv(result, project_root=BASE_DIR)
+    if diagnosis_history_path:
+        add_log("INFO", f"診断履歴CSV保存先: {diagnosis_history_path}")
+    else:
+        add_log("WARN", "diagnosis_history.csv への保存をスキップしました")
     vehicle_check_memo = input("実車確認メモを入力してください（任意）: ").strip()
     if vehicle_check_memo:
         add_log("INFO", "実車確認メモ入力あり")

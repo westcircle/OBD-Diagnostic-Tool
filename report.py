@@ -1,6 +1,7 @@
 ﻿# report.py
 # 診断結果を整形・保存する
 
+import csv
 from datetime import datetime
 from pathlib import Path
 
@@ -100,6 +101,45 @@ def _build_disclaimer_text() -> str:
     lines.append("最終判断には実車確認や追加点検が必要です。")
     lines.append("修理や部品交換は必要に応じて専門家への相談もご検討ください。")
     return "\n".join(lines)
+
+
+def _get_dtc_codes_list(result: dict) -> list[str]:
+    dtc_codes = result.get("dtc_codes", [])
+    if isinstance(dtc_codes, list):
+        return [str(code).strip() for code in dtc_codes if str(code).strip()]
+
+    dtc_code = str(result.get("dtc_code", "")).strip()
+    if dtc_code and dtc_code != "未入力":
+        return [dtc_code]
+
+    diagnoses = result.get("diagnoses", [])
+    codes = []
+    for diagnosis in diagnoses:
+        code = str(diagnosis.get("dtc_code", "")).strip()
+        if code and code != "未入力" and code not in codes:
+            codes.append(code)
+    return codes
+
+
+def _build_diagnosis_history_row(result: dict) -> dict[str, str]:
+    dtc_codes = _get_dtc_codes_list(result)
+    overall_notes = result.get("overall_reference_notes", [])
+    if not isinstance(overall_notes, list):
+        overall_notes = [str(overall_notes)] if overall_notes else []
+
+    return {
+        "diagnosis_datetime": str(result.get("diagnosis_datetime", "") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "vin": str(result.get("vin", "") or ""),
+        "maker": str(result.get("maker", "") or ""),
+        "model": str(result.get("model", "") or ""),
+        "year": str(result.get("year", "") or ""),
+        "mileage": str(result.get("mileage", "") or ""),
+        "symptom": str(result.get("symptom", "") or ""),
+        "dtc_count": str(len(dtc_codes)),
+        "dtc_codes": "|".join(dtc_codes),
+        "overall_level": str(result.get("overall_level", "") or ""),
+        "overall_reference_notes": " / ".join(str(note) for note in overall_notes[:3] if str(note).strip()),
+    }
 
 
 def _resolve_unique_path(directory: Path, filename: str) -> Path:
@@ -215,3 +255,25 @@ def save_report_text(report_text: str, result: dict, project_root: Path | str = 
         f.write(save_text)
 
     return str(file_path)
+
+
+def append_diagnosis_history_csv(result: dict, project_root: Path | str = ".") -> str | None:
+    """診断結果を logs/diagnosis_history.csv に追記する。失敗時は None を返す。"""
+    try:
+        root_path = Path(project_root)
+        logs_dir = root_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        file_path = logs_dir / "diagnosis_history.csv"
+        row = _build_diagnosis_history_row(result)
+        fieldnames = list(row.keys())
+        file_exists = file_path.exists()
+
+        with file_path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+
+        return str(file_path)
+    except Exception:
+        return None

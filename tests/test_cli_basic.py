@@ -1,5 +1,9 @@
 ﻿import unittest
 
+import csv
+from pathlib import Path
+from tempfile import NamedTemporaryFile, TemporaryDirectory
+
 from diagnosis import run_multi_diagnosis
 import main_cli
 from utils import normalize_maker_name, normalize_symptom_name, parse_year_to_western
@@ -411,6 +415,78 @@ class TestMainCliBasics(unittest.TestCase):
         report_text = main_cli.format_report(result)
         self.assertIn("[総合参考メモ]", report_text)
         self.assertIn("燃調/吸気系", report_text)
+
+    def test_append_diagnosis_history_csv_creates_header_and_row(self):
+        with TemporaryDirectory() as tmpdir:
+            result = run_multi_diagnosis(
+                maker="トヨタ",
+                model="テスト車",
+                year="1999",
+                mileage="100000",
+                dtc_codes=["P0171"],
+                symptom="燃費悪化",
+            )
+            result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+            result["overall_reference_notes"] = ["燃調/吸気系の参考確認を優先してください"]
+            path = main_cli.append_diagnosis_history_csv(result, project_root=tmpdir)
+            self.assertIsNotNone(path)
+            csv_path = Path(path)
+            self.assertTrue(csv_path.exists())
+            with csv_path.open("r", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["dtc_codes"], "P0171")
+            self.assertIn("燃調/吸気系", rows[0]["overall_reference_notes"])
+
+    def test_append_diagnosis_history_csv_appends_rows(self):
+        with TemporaryDirectory() as tmpdir:
+            result = run_multi_diagnosis(
+                maker="トヨタ",
+                model="テスト車",
+                year="1999",
+                mileage="100000",
+                dtc_codes=["P0171", "P0420"],
+                symptom="燃費悪化",
+            )
+            result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+            main_cli.append_diagnosis_history_csv(result, project_root=tmpdir)
+            main_cli.append_diagnosis_history_csv(result, project_root=tmpdir)
+            csv_path = Path(tmpdir) / "logs" / "diagnosis_history.csv"
+            with csv_path.open("r", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["dtc_count"], "2")
+
+    def test_append_diagnosis_history_csv_handles_no_dtc(self):
+        with TemporaryDirectory() as tmpdir:
+            result = run_multi_diagnosis(
+                maker="",
+                model="",
+                year="",
+                mileage="",
+                dtc_codes=[],
+                symptom="",
+            )
+            result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+            path = main_cli.append_diagnosis_history_csv(result, project_root=tmpdir)
+            self.assertIsNotNone(path)
+            with Path(path).open("r", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]["dtc_count"], "0")
+            self.assertEqual(rows[0]["dtc_codes"], "")
+
+    def test_append_diagnosis_history_csv_returns_none_on_save_failure(self):
+        with NamedTemporaryFile() as tmpfile:
+            result = run_multi_diagnosis(
+                maker="トヨタ",
+                model="テスト車",
+                year="1999",
+                mileage="100000",
+                dtc_codes=["P0171"],
+                symptom="燃費悪化",
+            )
+            path = main_cli.append_diagnosis_history_csv(result, project_root=tmpfile.name)
+            self.assertIsNone(path)
 
     def test_build_dtc_history_hints_with_matches(self):
         import os
