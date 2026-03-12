@@ -28,6 +28,7 @@ car_diagnosis_ai/
 ├─ maker_notes.py
 ├─ symptom_rules.py
 ├─ report.py
+├─ plot_live_csv.py
 ├─ simulator.py
 ├─ utils.py
 ├─ wmi_map.json / vds_map.json / manufacturers.json
@@ -46,6 +47,8 @@ car_diagnosis_ai/
   `run_multi_diagnosis()` など、診断ロジック本体です。
 - `report.py`  
   `format_report()` と `save_report_text()` で表示整形と保存を担当します。
+- `plot_live_csv.py`  
+  保存済みの `logs/live_*.csv` から、PID推移グラフをPNG保存する補助スクリプトです。
 - `dtc_data.py` / `maker_notes.py` / `symptom_rules.py` / `utils.py`  
   DTC辞書、メーカー補足、症状ルール、入力正規化などを担当します。
 - `simulator.py`  
@@ -80,6 +83,7 @@ car_diagnosis_ai/
 - ライブデータCSV保存と、保存済みCSVの簡易後解析
 - 保存済みCSVの要約表示（RPM / ECT / MAF / SPEED / IAT / THR）
 - 保存済みCSVのアイドル参考、暖機参考、未取得サマリー、記録タイプ分類の参考表示
+- 補助スクリプト `plot_live_csv.py` による、保存済みCSVからのグラフPNG保存
 - 一部メーカー / 車種系統の参考プロファイル表示
 - レクサスES / トヨタ・レクサスHV系を含む実車傾向ベースの参考表示
 - 現在状態表示（接続/VIN/DTCなど）
@@ -151,7 +155,19 @@ cd /d C:\Users\User\Desktop\car_diagnosis_ai
 python main_cli.py
 ```
 
+```bash
+cd /d C:\Users\User\Desktop\car_diagnosis_ai
+python plot_live_csv.py
+```
+
+```bash
+cd /d C:\Users\User\Desktop\car_diagnosis_ai
+python plot_live_csv.py logs\live_2026-03-12_151103.csv
+```
+
 Windows のコマンドプロンプトや PowerShell で、そのまま実行できます。
+`plot_live_csv.py` は補助スクリプトで、保存済みのライブCSVから RPM / ECT / MAF / SPEED / IAT / THR の推移をPNG化します。  
+CSVを省略すると最新の `logs/live_*.csv` を自動選択し、必要なら引数で対象CSVを指定できます。
 
 ---
 
@@ -189,6 +205,7 @@ python -m unittest tests.test_cli_basic -v
 接続確認や実車テスト時の記録を残して、あとから見返す用途に使えます。  
 保存済みのライブCSVは、`main_cli.py` のメニューからあとで簡易解析でき、RPM / ECT / MAF / SPEED / IAT / THR の要約と参考コメントを確認できます。
 あわせて、アイドル中心かどうかの目安、暖機途中 / 暖機後の参考表示、未取得が多い項目、記録タイプ（停止中心ログ / 走行ありログ / 混在ログ / 判定保留）も確認できます。  
+また、`plot_live_csv.py` を使うと保存済みCSVからグラフ画像を `logs/` に保存できます。空欄や未取得列があっても、描画できる範囲でPNG化します。  
 後解析の表示はいずれも参考用で、単独で異常や故障を断定するものではありません。
 
 ---
@@ -201,3 +218,5 @@ python -m unittest tests.test_cli_basic -v
 - DTC知識ベース、DTC+PID補助コメント、車種プロファイル、ライブCSV後解析はいずれも参考表示です。単独では故障断定できません。
 - `VIN候補` は完全VINではない場合があります。再取得できる場合は再試行してください。
 - ハイブリッド系ではアイドル値やスロットル値の見え方が通常ガソリン車と異なる場合があります。単純比較で断定しないでください。
+- ライブCSVグラフ生成には `matplotlib` が必要です。`requirements.txt` に追記済みです。
+- グラフ画像も傾向確認用です。単独で異常や故障を断定するものではありません。
