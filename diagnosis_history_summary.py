@@ -34,6 +34,9 @@ def filter_rows(
     dtc: str = "",
     vin: str = "",
     symptom: str = "",
+    maker: str = "",
+    model: str = "",
+    level: str = "",
 ) -> list[dict[str, str]]:
     filtered = rows
 
@@ -51,6 +54,26 @@ def filter_rows(
         keyword = symptom.strip().lower()
         filtered = [row for row in filtered if keyword in str(row.get("symptom", "")).lower()]
 
+    if maker:
+        keyword = maker.strip().lower()
+        filtered = [
+            row for row in filtered if str(row.get("maker", "")).strip() and keyword in str(row.get("maker", "")).lower()
+        ]
+
+    if model:
+        keyword = model.strip().lower()
+        filtered = [
+            row for row in filtered if str(row.get("model", "")).strip() and keyword in str(row.get("model", "")).lower()
+        ]
+
+    if level:
+        target_level = level.strip()
+        filtered = [
+            row
+            for row in filtered
+            if str(row.get("overall_level", "")).strip() and str(row.get("overall_level", "")).strip() == target_level
+        ]
+
     return sort_rows(filtered)
 
 
@@ -60,6 +83,35 @@ def summarize_dtc_counts(rows: list[dict[str, str]]) -> list[tuple[str, int]]:
         for code in split_dtc_codes(row.get("dtc_codes", "")):
             counter[code] += 1
     return counter.most_common()
+
+
+def summarize_recurring_dtc_details(rows: list[dict[str, str]]) -> list[dict[str, str | int]]:
+    stats: dict[str, dict[str, str | int]] = {}
+    for row in rows:
+        diagnosis_datetime = str(row.get("diagnosis_datetime", "") or "").strip()
+        for code in split_dtc_codes(row.get("dtc_codes", "")):
+            if code not in stats:
+                stats[code] = {"code": code, "count": 0, "last_seen": ""}
+            stats[code]["count"] = int(stats[code]["count"]) + 1
+            current_last_seen = str(stats[code].get("last_seen", "") or "")
+            if diagnosis_datetime and diagnosis_datetime > current_last_seen:
+                stats[code]["last_seen"] = diagnosis_datetime
+
+    recurring = [item for item in stats.values() if int(item["count"]) >= 2]
+    return sorted(recurring, key=lambda item: (-int(item["count"]), str(item["code"])))
+
+
+def summarize_recurring_dtc_counts(rows: list[dict[str, str]]) -> list[tuple[str, int]]:
+    return [(str(item["code"]), int(item["count"])) for item in summarize_recurring_dtc_details(rows)]
+
+
+def format_recurring_dtc_line(item: dict[str, str | int]) -> str:
+    code = str(item.get("code", "") or "")
+    count = int(item.get("count", 0) or 0)
+    last_seen = str(item.get("last_seen", "") or "").strip()
+    if last_seen:
+        return f"- {code}: {count}（最新: {last_seen}）"
+    return f"- {code}: {count}"
 
 
 def build_row_line(row: dict[str, str]) -> str:
@@ -81,8 +133,26 @@ def print_summary(rows: list[dict[str, str]], limit: int = DEFAULT_LIMIT) -> Non
         for code, count in dtc_counts[:limit]:
             print(f"- {code}: {count}")
     print("")
+    print("再発上位DTC:")
+    recurring_details = summarize_recurring_dtc_details(rows)
+    if not recurring_details:
+        print("- 再発上位DTCはありません")
+    else:
+        for item in recurring_details[:limit]:
+            print(format_recurring_dtc_line(item))
+    print("")
     print(f"直近履歴: {min(limit, len(rows))}件")
     print_rows(rows, limit=limit)
+
+
+def print_recurring_summary(rows: list[dict[str, str]], limit: int = DEFAULT_LIMIT) -> None:
+    print("再発上位DTC:")
+    recurring_details = summarize_recurring_dtc_details(rows)
+    if not recurring_details:
+        print("- 再発上位DTCはありません")
+        return
+    for item in recurring_details[:limit]:
+        print(format_recurring_dtc_line(item))
 
 
 def print_rows(rows: list[dict[str, str]], limit: int = DEFAULT_LIMIT) -> None:
@@ -95,11 +165,15 @@ def print_rows(rows: list[dict[str, str]], limit: int = DEFAULT_LIMIT) -> None:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="diagnosis_history.csv の履歴確認を簡単に行う補助CLIです。")
+    parser = argparse.ArgumentParser(description="diagnosis_history.csv の履歴確認を行うCLIです。")
     parser.add_argument("--dtc", help="指定DTCを含む履歴だけ表示します")
     parser.add_argument("--vin", help="VIN完全一致で履歴を抽出します")
     parser.add_argument("--symptom", help="症状キーワードで部分一致検索します")
+    parser.add_argument("--maker", help="メーカー名で部分一致検索します")
+    parser.add_argument("--model", help="車種名で部分一致検索します")
+    parser.add_argument("--level", help="総合緊急度で絞り込みます")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="表示件数を制限します")
+    parser.add_argument("--recurring", action="store_true", help="再発上位DTCだけを表示します")
     parser.add_argument("--path", default=str(get_default_history_path()), help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
@@ -120,9 +194,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     limit = max(args.limit, 0)
-    filtered_rows = filter_rows(rows, dtc=args.dtc or "", vin=args.vin or "", symptom=args.symptom or "")
+    filtered_rows = filter_rows(
+        rows,
+        dtc=args.dtc or "",
+        vin=args.vin or "",
+        symptom=args.symptom or "",
+        maker=args.maker or "",
+        model=args.model or "",
+        level=args.level or "",
+    )
 
-    if args.dtc or args.vin or args.symptom:
+    if args.recurring:
+        print_recurring_summary(filtered_rows, limit=limit)
+        return 0
+
+    if args.dtc or args.vin or args.symptom or args.maker or args.model or args.level:
         print(f"該当件数: {len(filtered_rows)}")
         print_rows(filtered_rows, limit=limit)
         return 0
