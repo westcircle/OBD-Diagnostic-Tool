@@ -48,6 +48,40 @@ class TestCompareLiveCsv(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_build_summary_can_reuse_main_cli_anomalies(self):
+        with tempfile.NamedTemporaryFile("w", delete=False, newline="", encoding="utf-8", suffix=".csv") as f:
+            f.write("time,rpm,ect,maf,speed,iat,thr\n")
+            f.write("10:00:00,700,80,3.0,0,20,10\n")
+            f.write("10:00:01,900,81,3.2,0,20,10\n")
+            f.write("10:00:02,720,82,3.1,0,21,11\n")
+            f.write("10:00:03,910,82,3.2,0,21,11\n")
+            f.write("10:00:04,730,83,3.0,0,21,10\n")
+            path = f.name
+        try:
+            summary = compare_live_csv.build_summary(path)
+            self.assertIn("anomalies", summary)
+            self.assertTrue(any("RPMのばらつき" in line for line in summary["anomalies"]))
+        finally:
+            os.unlink(path)
+
+    def test_build_summary_anomalies_with_missing_columns_does_not_fail(self):
+        with tempfile.NamedTemporaryFile("w", delete=False, newline="", encoding="utf-8", suffix=".csv") as f:
+            f.write("time,rpm\n")
+            f.write("10:00:00,750\n")
+            path = f.name
+        try:
+            summary = compare_live_csv.build_summary(path)
+            self.assertIn("anomalies", summary)
+            self.assertIsInstance(summary["anomalies"], list)
+        finally:
+            os.unlink(path)
+
+    def test_print_single_anomaly_section_with_empty_comments(self):
+        compare_live_csv.print_single_anomaly_section(
+            {"anomalies": [], "row_count": 0},
+            {"anomalies": [], "row_count": 0},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

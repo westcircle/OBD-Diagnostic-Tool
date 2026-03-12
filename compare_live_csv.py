@@ -84,6 +84,7 @@ def build_summary(path):
     for key, _label in PID_COLUMNS:
         summary[key] = summarize_pid(rows, key)
     summary["log_type"] = main_cli.classify_live_log_type(summary)
+    summary["anomalies"] = main_cli.build_live_anomaly_comments(summary)
     return summary
 
 
@@ -171,6 +172,26 @@ def print_missing_compare(summary_a, summary_b):
         print(f"  B 空欄 {summary_b.get(key, {}).get('missing', 0)}/{summary_b.get('row_count', 0)}")
 
 
+def print_single_anomaly_section(summary_a, summary_b):
+    print("[単独ログ異常傾向]")
+    print("A:")
+    anomalies_a = summary_a.get("anomalies", [])
+    if not anomalies_a:
+        print("- 特に大きな異常傾向コメントはありません")
+    else:
+        for line in anomalies_a[:5]:
+            print(f"- {line}")
+    print("")
+    print("B:")
+    anomalies_b = summary_b.get("anomalies", [])
+    if not anomalies_b:
+        print("- 特に大きな異常傾向コメントはありません")
+    else:
+        for line in anomalies_b[:5]:
+            print(f"- {line}")
+    print("")
+
+
 def print_compare_report(path_a, path_b, summary_a, summary_b):
     print("==================================================")
     print("CSVログ比較")
@@ -187,6 +208,7 @@ def print_compare_report(path_a, path_b, summary_a, summary_b):
     print(f"B: {summary_b.get('log_type', {}).get('label', '判定保留')}")
     print("")
     print_pid_compare(summary_a, summary_b)
+    print_single_anomaly_section(summary_a, summary_b)
     comments = build_compare_comments(summary_a, summary_b)
     print("[比較コメント]")
     if not comments:
