@@ -148,6 +148,8 @@ def _format_single_diagnosis_block(result: dict) -> str:
 
 def format_report(result: dict) -> str:
     """診断結果を表示用の文字列にする"""
+    overall_notes = result.get("overall_reference_notes", [])
+
     # 既存の単一結果フォーマットとの互換も維持
     if "diagnoses" not in result:
         lines = []
@@ -162,6 +164,11 @@ def format_report(result: dict) -> str:
         lines.append(f"総合緊急度: {result.get('overall_level', '不明')}")
         lines.append("")
         lines.append(_format_single_diagnosis_block(result))
+        if overall_notes:
+            lines.append("")
+            lines.append("[総合参考メモ]")
+            for note in overall_notes[:3]:
+                lines.append(f"- {note}")
         return "\n".join(lines)
 
     dtc_list_text = _get_dtc_list_text(result)
@@ -182,6 +189,12 @@ def format_report(result: dict) -> str:
         lines.append("")
         lines.append("-" * 40)
         lines.append(_format_single_diagnosis_block(diagnosis))
+
+    if overall_notes:
+        lines.append("")
+        lines.append("[総合参考メモ]")
+        for note in overall_notes[:3]:
+            lines.append(f"- {note}")
 
     return "\n".join(lines)
 

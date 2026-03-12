@@ -2175,6 +2175,9 @@ def run_obd_diagnosis_flow(ser, cached_vin):
         symptom=symptom,
     )
     result["diagnosis_datetime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    result["overall_reference_notes"] = build_overall_reference_notes(
+        dtc_list=codes,
+    )
 
     report_text = format_report(result)
     print("")

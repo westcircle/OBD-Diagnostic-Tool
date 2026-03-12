@@ -397,6 +397,21 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertIsInstance(notes, list)
         self.assertLessEqual(len(notes), 3)
 
+    def test_format_report_includes_overall_reference_notes(self):
+        result = run_multi_diagnosis(
+            maker="トヨタ",
+            model="テスト車",
+            year="1999",
+            mileage="100000",
+            dtc_codes=["P0171"],
+            symptom="燃費悪化",
+        )
+        result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+        result["overall_reference_notes"] = ["燃調/吸気系の参考確認を優先してください。MAF取得状況も見てください"]
+        report_text = main_cli.format_report(result)
+        self.assertIn("[総合参考メモ]", report_text)
+        self.assertIn("燃調/吸気系", report_text)
+
     def test_build_dtc_history_hints_with_matches(self):
         import os
         import tempfile
