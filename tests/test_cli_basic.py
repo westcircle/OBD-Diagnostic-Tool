@@ -362,6 +362,41 @@ class TestMainCliBasics(unittest.TestCase):
         )
         self.assertIsInstance(comments, list)
 
+    def test_build_overall_reference_notes_for_airflow(self):
+        notes = main_cli.build_overall_reference_notes(
+            dtc_list=["P0171"],
+            dtc_pid_hints=["参考: P0171で低開度かつMAF低めです。吸気側の二次エアやエアフロ汚れも要確認です"],
+        )
+        self.assertTrue(any("燃調/吸気系" in note for note in notes))
+
+    def test_build_overall_reference_notes_for_warmup(self):
+        notes = main_cli.build_overall_reference_notes(
+            anomaly_comments=["[弱] 参考: ECTが低めで、まだ暖機途中の可能性があります"],
+            summary={"row_count": 6, "log_type": {"label": "停止中心ログ"}},
+        )
+        self.assertTrue(any("暖機条件をそろえて再確認" in note for note in notes))
+
+    def test_build_overall_reference_notes_for_many_missing(self):
+        notes = main_cli.build_overall_reference_notes(
+            anomaly_comments=["[弱] 参考: 未取得が多い項目があります (MAF, SPEED)"],
+            summary={
+                "row_count": 10,
+                "log_type": {"label": "判定保留"},
+                "rpm": {"missing": 0},
+                "ect": {"missing": 0},
+                "maf": {"missing": 8},
+                "speed": {"missing": 8},
+                "iat": {"missing": 0},
+                "thr": {"missing": 0},
+            },
+        )
+        self.assertTrue(any("参考範囲" in note for note in notes))
+
+    def test_build_overall_reference_notes_handles_empty_input(self):
+        notes = main_cli.build_overall_reference_notes()
+        self.assertIsInstance(notes, list)
+        self.assertLessEqual(len(notes), 3)
+
     def test_build_dtc_history_hints_with_matches(self):
         import os
         import tempfile

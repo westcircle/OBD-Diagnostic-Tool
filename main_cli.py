@@ -482,6 +482,40 @@ def build_live_anomaly_comments(summary, profile=None):
     return comments[:5]
 
 
+def build_overall_reference_notes(dtc_list=None, dtc_pid_hints=None, anomaly_comments=None, summary=None):
+    notes = []
+    codes = {str(code).strip().upper() for code in (dtc_list or []) if code}
+    hint_text = " ".join(dtc_pid_hints or [])
+    anomaly_text = " ".join(anomaly_comments or [])
+    combined_text = f"{hint_text} {anomaly_text}"
+    log_type = (summary or {}).get("log_type", {}).get("label")
+    missing_info = build_missing_column_summary(summary or {"row_count": 0})
+
+    def add_note(text):
+        if text and text not in notes:
+            notes.append(text)
+
+    if "P0171" in codes or any(word in combined_text for word in ("二次エア", "エアフロ", "吸気", "燃調")):
+        add_note("燃調/吸気系の参考確認を優先してください。MAF取得状況や吸気条件差も含めて見てください")
+
+    if "P0500" in codes or any(word in combined_text for word in ("車速PID", "車速信号", "SPEEDの取得")):
+        add_note("車速系と取得条件差の両面を参考確認してください")
+
+    if "B2797" in codes:
+        add_note("認証系/イモビ系も別系統として参考確認してください")
+
+    if any(word in combined_text for word in ("暖機途中", "ECTが低め", "暖機条件")):
+        add_note("暖機条件をそろえて再確認すると、今回の傾向を比較しやすくなります")
+
+    if any(word in combined_text for word in ("未取得が多い", "PID取得が限定的", "未取得データが多く")) or missing_info["many_missing"]:
+        add_note("PID未取得が多い場合は、今回結果を参考範囲として見てください")
+
+    if log_type == "停止中心ログ":
+        add_note("停止中心ログのため、必要に応じて走行条件でも再確認すると判断しやすくなります")
+
+    return notes[:3]
+
+
 def build_live_csv_comments(summary):
     comments = []
     rpm = summary.get("rpm", {})
@@ -588,6 +622,15 @@ def print_live_csv_analysis(summary):
         print("")
         print("[ライブ異常検出]")
         for line in anomalies:
+            print(f"- {line}")
+    overall_notes = build_overall_reference_notes(
+        anomaly_comments=anomalies,
+        summary=summary,
+    )
+    if overall_notes:
+        print("")
+        print("[総合参考メモ]")
+        for line in overall_notes:
             print(f"- {line}")
 
 
@@ -1546,6 +1589,15 @@ def print_pid_comment_block(pid, dtc_list=None):
         print("")
         print("DTC連動補足:")
         for line in hint_lines:
+            print(f"- {line}")
+    overall_notes = build_overall_reference_notes(
+        dtc_list=dtc_list,
+        dtc_pid_hints=hint_lines,
+    )
+    if overall_notes:
+        print("")
+        print("[総合参考メモ]")
+        for line in overall_notes:
             print(f"- {line}")
 
 
