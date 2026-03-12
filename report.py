@@ -5,6 +5,8 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+from dtc_data import get_dtc_failure_candidates
+
 
 def _sanitize_filename_part(text: str, fallback: str, max_length: int = 20) -> str:
     """ファイル名に使えるように文字列を安全化する"""
@@ -170,11 +172,26 @@ def _format_list(title: str, items: list) -> str:
     return "\n".join(lines)
 
 
+def _format_failure_candidates(dtc_code: str) -> str:
+    candidates = get_dtc_failure_candidates(dtc_code)
+    if not candidates:
+        return ""
+
+    lines = ["[故障候補]", "- 参考候補です。優先確認の当たりとして見てください"]
+    for index, candidate in enumerate(candidates[:3], start=1):
+        lines.append(f"- {index}. {candidate}")
+    return "\n".join(lines)
+
+
 def _format_single_diagnosis_block(result: dict) -> str:
     lines = []
     lines.append(f"DTC: {result['dtc_code']}")
     lines.append("コード説明")
     lines.append(result["dtc_title"])
+    failure_candidates_text = _format_failure_candidates(result["dtc_code"])
+    if failure_candidates_text:
+        lines.append("")
+        lines.append(failure_candidates_text)
     lines.append("")
     lines.append(_format_list("原因候補", result["causes"]))
     lines.append("")

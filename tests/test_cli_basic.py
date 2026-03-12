@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
+import dtc_data
 from diagnosis import run_multi_diagnosis
 import main_cli
 from utils import normalize_maker_name, normalize_symptom_name, parse_year_to_western
@@ -415,6 +416,31 @@ class TestMainCliBasics(unittest.TestCase):
         report_text = main_cli.format_report(result)
         self.assertIn("[総合参考メモ]", report_text)
         self.assertIn("燃調/吸気系", report_text)
+
+    def test_get_dtc_failure_candidates_returns_three_items_for_known_code(self):
+        candidates = dtc_data.get_dtc_failure_candidates("P0171")
+        self.assertGreaterEqual(len(candidates), 3)
+        self.assertIn("吸気漏れ", candidates)
+
+    def test_get_dtc_failure_candidates_returns_empty_for_unknown_code(self):
+        self.assertEqual(dtc_data.get_dtc_failure_candidates("P9999"), [])
+
+    def test_load_dtc_failure_map_returns_empty_when_file_is_missing(self):
+        self.assertEqual(dtc_data.load_dtc_failure_map(path="C:\\not_found_dtc_failure_map.json"), {})
+
+    def test_format_report_includes_failure_candidates_when_available(self):
+        result = run_multi_diagnosis(
+            maker="トヨタ",
+            model="テスト車",
+            year="1999",
+            mileage="100000",
+            dtc_codes=["P0171"],
+            symptom="燃費悪化",
+        )
+        result["diagnosis_datetime"] = "2026-03-12 10:00:00"
+        report_text = main_cli.format_report(result)
+        self.assertIn("[故障候補]", report_text)
+        self.assertIn("1. 吸気漏れ", report_text)
 
     def test_append_diagnosis_history_csv_creates_header_and_row(self):
         with TemporaryDirectory() as tmpdir:

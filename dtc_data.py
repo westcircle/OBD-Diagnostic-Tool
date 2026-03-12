@@ -77,3 +77,34 @@ DTC_DB = {
         "notes": ["車速信号はAT制御やメーター系にも影響することがあります"],
     },
 }
+
+import json
+from pathlib import Path
+
+
+def load_dtc_failure_map(path: str | Path | None = None) -> dict:
+    file_path = Path(path) if path else Path(__file__).resolve().parent / "dtc_failure_map.json"
+    try:
+        with file_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def get_dtc_failure_candidates(code: str, limit: int = 3, failure_map: dict | None = None, path: str | Path | None = None) -> list[str]:
+    normalized = str(code or "").strip().upper()
+    if not normalized:
+        return []
+
+    source_map = failure_map if isinstance(failure_map, dict) else load_dtc_failure_map(path=path)
+    item = source_map.get(normalized, {})
+    if not isinstance(item, dict):
+        return []
+
+    candidates = item.get("candidates", [])
+    if not isinstance(candidates, list):
+        return []
+
+    cleaned = [str(candidate).strip() for candidate in candidates if str(candidate).strip()]
+    return cleaned[: max(limit, 0)]
