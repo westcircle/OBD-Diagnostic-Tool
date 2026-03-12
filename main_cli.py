@@ -374,7 +374,47 @@ def classify_live_log_type(summary):
     }
 
 
-def build_live_anomaly_comments(summary):
+LIVE_ANOMALY_THRESHOLDS = {
+    "idle_rpm_span_warn": 150,
+    "ect_low_max": 60,
+    "ect_high_max": 105,
+    "maf_low_idle_avg": 1.5,
+    "maf_high_idle_avg": 8.0,
+    "thr_high_idle_avg": 20.0,
+}
+
+
+LIVE_ANOMALY_PROFILE_OVERRIDES = {
+    "セルシオ参考": {
+        "idle_rpm_span_warn": 220,
+    },
+    "VW系参考": {
+        "maf_high_idle_avg": 10.0,
+    },
+    "日産キューブ参考": {
+        "thr_high_idle_avg": 24.0,
+    },
+    "レクサスES / HV系参考": {
+        "maf_low_idle_avg": 1.0,
+        "thr_high_idle_avg": 28.0,
+    },
+    "トヨタ / レクサスHV系参考": {
+        "maf_low_idle_avg": 1.0,
+        "thr_high_idle_avg": 28.0,
+    },
+}
+
+
+def get_live_anomaly_thresholds(profile=None):
+    thresholds = dict(LIVE_ANOMALY_THRESHOLDS)
+    profile_info = profile or {}
+    title = profile_info.get("title")
+    if title in LIVE_ANOMALY_PROFILE_OVERRIDES:
+        thresholds.update(LIVE_ANOMALY_PROFILE_OVERRIDES[title])
+    return thresholds
+
+
+def build_live_anomaly_comments(summary, profile=None):
     comments = []
     row_count = summary.get("row_count", 0)
     rpm = summary.get("rpm", {})
@@ -385,6 +425,7 @@ def build_live_anomaly_comments(summary):
     thr = summary.get("thr", {})
     missing_info = build_missing_column_summary(summary)
     log_type = summary.get("log_type") or classify_live_log_type(summary)
+    thresholds = get_live_anomaly_thresholds(profile or summary.get("vehicle_profile") or summary.get("profile"))
 
     def add_comment(text):
         if text and text not in comments:
@@ -392,20 +433,20 @@ def build_live_anomaly_comments(summary):
 
     if rpm.get("count", 0) >= 5 and log_type.get("label") == "停止中心ログ":
         rpm_span = rpm.get("max", 0) - rpm.get("min", 0)
-        if rpm_span >= 150:
+        if rpm_span >= thresholds["idle_rpm_span_warn"]:
             add_comment("参考: RPMのばらつきがやや大きく、アイドル不安定傾向の可能性があります")
 
     if ect.get("count", 0) >= 3:
-        if ect.get("max") is not None and ect.get("max") < 60:
+        if ect.get("max") is not None and ect.get("max") < thresholds["ect_low_max"]:
             add_comment("参考: ECTが低めで、まだ暖機途中の可能性があります")
-        elif ect.get("max") is not None and ect.get("max") > 105:
+        elif ect.get("max") is not None and ect.get("max") > thresholds["ect_high_max"]:
             add_comment("参考: ECTが高めに見えます。測定条件差も含めて要確認です")
 
     if log_type.get("label") == "停止中心ログ" and maf.get("count", 0):
         maf_avg = maf.get("avg")
-        if maf_avg is not None and maf_avg < 1.5:
+        if maf_avg is not None and maf_avg < thresholds["maf_low_idle_avg"]:
             add_comment("参考: MAFが低めの傾向です。吸気条件差も含めて参考確認してください")
-        elif maf_avg is not None and maf_avg > 8:
+        elif maf_avg is not None and maf_avg > thresholds["maf_high_idle_avg"]:
             add_comment("参考: MAFが高めの傾向です。負荷条件や吸気状態も参考確認してください")
     if row_count > 0 and maf.get("missing", 0) >= max(2, row_count // 2):
         add_comment("参考: MAFの未取得が多く、取得条件やPID対応状況も要確認です")
@@ -418,7 +459,7 @@ def build_live_anomaly_comments(summary):
     if iat.get("count", 0) and (iat.get("avg", 0) < -20 or iat.get("avg", 0) > 60):
         add_comment("参考: IATが不自然寄りに見えます。吸気温センサー値も要確認です")
 
-    if log_type.get("label") == "停止中心ログ" and thr.get("count", 0) and thr.get("avg", 0) > 20:
+    if log_type.get("label") == "停止中心ログ" and thr.get("count", 0) and thr.get("avg", 0) > thresholds["thr_high_idle_avg"]:
         add_comment("参考: 停止中心としてはTHROTTLEが高めです。操作条件差も含めて確認してください")
 
     if missing_info["many_missing"]:

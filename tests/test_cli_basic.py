@@ -294,6 +294,70 @@ class TestMainCliBasics(unittest.TestCase):
         self.assertTrue(any("未取得が多い項目" in comment for comment in comments))
         self.assertLessEqual(len(comments), 5)
 
+    def test_build_live_anomaly_comments_without_profile_keeps_default_thresholds(self):
+        comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 6,
+                "log_type": {"label": "停止中心ログ"},
+                "rpm": {"count": 6, "min": 700.0, "max": 860.0, "avg": 780.0, "missing": 0},
+                "ect": {"count": 6, "missing": 0, "max": 82.0, "avg": 80.0},
+                "maf": {"count": 6, "missing": 0, "avg": 3.0},
+                "speed": {"count": 6, "missing": 0, "max": 0.0, "avg": 0.0},
+                "iat": {"count": 6, "missing": 0, "avg": 20.0},
+                "thr": {"count": 6, "missing": 0, "avg": 10.0},
+            }
+        )
+        self.assertTrue(any("RPMのばらつき" in comment for comment in comments))
+
+    def test_build_live_anomaly_comments_profile_changes_rpm_threshold(self):
+        summary = {
+            "row_count": 6,
+            "log_type": {"label": "停止中心ログ"},
+            "rpm": {"count": 6, "min": 700.0, "max": 860.0, "avg": 780.0, "missing": 0},
+            "ect": {"count": 6, "missing": 0, "max": 82.0, "avg": 80.0},
+            "maf": {"count": 6, "missing": 0, "avg": 3.0},
+            "speed": {"count": 6, "missing": 0, "max": 0.0, "avg": 0.0},
+            "iat": {"count": 6, "missing": 0, "avg": 20.0},
+            "thr": {"count": 6, "missing": 0, "avg": 10.0},
+        }
+        comments = main_cli.build_live_anomaly_comments(summary, profile={"title": "セルシオ参考"})
+        self.assertFalse(any("RPMのばらつき" in comment for comment in comments))
+
+    def test_build_live_anomaly_comments_profile_changes_maf_and_thr_thresholds(self):
+        summary = {
+            "row_count": 6,
+            "log_type": {"label": "停止中心ログ"},
+            "rpm": {"count": 6, "min": 740.0, "max": 780.0, "avg": 760.0, "missing": 0},
+            "ect": {"count": 6, "missing": 0, "max": 82.0, "avg": 80.0},
+            "maf": {"count": 6, "missing": 0, "avg": 9.0},
+            "speed": {"count": 6, "missing": 0, "max": 0.0, "avg": 0.0},
+            "iat": {"count": 6, "missing": 0, "avg": 20.0},
+            "thr": {"count": 6, "missing": 0, "avg": 22.0},
+        }
+        default_comments = main_cli.build_live_anomaly_comments(summary)
+        vw_comments = main_cli.build_live_anomaly_comments(summary, profile={"title": "VW系参考"})
+        cube_comments = main_cli.build_live_anomaly_comments(summary, profile={"title": "日産キューブ参考"})
+        self.assertTrue(any("MAFが高め" in comment for comment in default_comments))
+        self.assertFalse(any("MAFが高め" in comment for comment in vw_comments))
+        self.assertTrue(any("THROTTLEが高め" in comment for comment in default_comments))
+        self.assertFalse(any("THROTTLEが高め" in comment for comment in cube_comments))
+
+    def test_build_live_anomaly_comments_unknown_profile_does_not_fail(self):
+        comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 3,
+                "log_type": {"label": "判定保留"},
+                "rpm": {"count": 0, "missing": 3},
+                "ect": {"count": 0, "missing": 3},
+                "maf": {"count": 0, "missing": 3},
+                "speed": {"count": 0, "missing": 3},
+                "iat": {"count": 0, "missing": 3},
+                "thr": {"count": 0, "missing": 3},
+            },
+            profile={"title": "不明プロファイル"},
+        )
+        self.assertIsInstance(comments, list)
+
     def test_build_dtc_history_hints_with_matches(self):
         import os
         import tempfile
