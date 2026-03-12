@@ -235,6 +235,65 @@ class TestMainCliBasics(unittest.TestCase):
         )
         self.assertEqual(result["label"], "判定保留")
 
+    def test_build_live_anomaly_comments_rpm_variation(self):
+        comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 6,
+                "log_type": {"label": "停止中心ログ"},
+                "rpm": {"count": 6, "min": 700.0, "max": 900.0, "avg": 790.0, "missing": 0},
+                "ect": {"count": 6, "missing": 0, "max": 82.0, "avg": 80.0},
+                "maf": {"count": 6, "missing": 0, "avg": 3.5},
+                "speed": {"count": 6, "missing": 0, "max": 0.0, "avg": 0.0},
+                "iat": {"count": 6, "missing": 0, "avg": 20.0},
+                "thr": {"count": 6, "missing": 0, "avg": 10.0},
+            }
+        )
+        self.assertTrue(any("RPMのばらつき" in comment for comment in comments))
+
+    def test_build_live_anomaly_comments_ect_extremes(self):
+        low_comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 5,
+                "log_type": {"label": "停止中心ログ"},
+                "rpm": {"count": 5, "min": 750.0, "max": 780.0, "avg": 765.0, "missing": 0},
+                "ect": {"count": 5, "missing": 0, "max": 55.0, "avg": 50.0},
+                "maf": {"count": 5, "missing": 0, "avg": 3.0},
+                "speed": {"count": 5, "missing": 0, "max": 0.0, "avg": 0.0},
+                "iat": {"count": 5, "missing": 0, "avg": 18.0},
+                "thr": {"count": 5, "missing": 0, "avg": 8.0},
+            }
+        )
+        high_comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 5,
+                "log_type": {"label": "停止中心ログ"},
+                "rpm": {"count": 5, "min": 750.0, "max": 780.0, "avg": 765.0, "missing": 0},
+                "ect": {"count": 5, "missing": 0, "max": 110.0, "avg": 108.0},
+                "maf": {"count": 5, "missing": 0, "avg": 3.0},
+                "speed": {"count": 5, "missing": 0, "max": 0.0, "avg": 0.0},
+                "iat": {"count": 5, "missing": 0, "avg": 18.0},
+                "thr": {"count": 5, "missing": 0, "avg": 8.0},
+            }
+        )
+        self.assertTrue(any("暖機途中" in comment for comment in low_comments))
+        self.assertTrue(any("ECTが高め" in comment for comment in high_comments))
+
+    def test_build_live_anomaly_comments_many_missing(self):
+        comments = main_cli.build_live_anomaly_comments(
+            {
+                "row_count": 10,
+                "log_type": {"label": "判定保留"},
+                "rpm": {"count": 0, "missing": 10},
+                "ect": {"count": 0, "missing": 10},
+                "maf": {"count": 2, "missing": 8, "avg": 2.0},
+                "speed": {"count": 1, "missing": 9, "max": 0.0, "avg": 0.0},
+                "iat": {"count": 0, "missing": 10},
+                "thr": {"count": 1, "missing": 9, "avg": 12.0},
+            }
+        )
+        self.assertTrue(any("未取得が多い項目" in comment for comment in comments))
+        self.assertLessEqual(len(comments), 5)
+
     def test_build_dtc_history_hints_with_matches(self):
         import os
         import tempfile

@@ -374,6 +374,62 @@ def classify_live_log_type(summary):
     }
 
 
+def build_live_anomaly_comments(summary):
+    comments = []
+    row_count = summary.get("row_count", 0)
+    rpm = summary.get("rpm", {})
+    ect = summary.get("ect", {})
+    maf = summary.get("maf", {})
+    speed = summary.get("speed", {})
+    iat = summary.get("iat", {})
+    thr = summary.get("thr", {})
+    missing_info = build_missing_column_summary(summary)
+    log_type = summary.get("log_type") or classify_live_log_type(summary)
+
+    def add_comment(text):
+        if text and text not in comments:
+            comments.append(text)
+
+    if rpm.get("count", 0) >= 5 and log_type.get("label") == "停止中心ログ":
+        rpm_span = rpm.get("max", 0) - rpm.get("min", 0)
+        if rpm_span >= 150:
+            add_comment("参考: RPMのばらつきがやや大きく、アイドル不安定傾向の可能性があります")
+
+    if ect.get("count", 0) >= 3:
+        if ect.get("max") is not None and ect.get("max") < 60:
+            add_comment("参考: ECTが低めで、まだ暖機途中の可能性があります")
+        elif ect.get("max") is not None and ect.get("max") > 105:
+            add_comment("参考: ECTが高めに見えます。測定条件差も含めて要確認です")
+
+    if log_type.get("label") == "停止中心ログ" and maf.get("count", 0):
+        maf_avg = maf.get("avg")
+        if maf_avg is not None and maf_avg < 1.5:
+            add_comment("参考: MAFが低めの傾向です。吸気条件差も含めて参考確認してください")
+        elif maf_avg is not None and maf_avg > 8:
+            add_comment("参考: MAFが高めの傾向です。負荷条件や吸気状態も参考確認してください")
+    if row_count > 0 and maf.get("missing", 0) >= max(2, row_count // 2):
+        add_comment("参考: MAFの未取得が多く、取得条件やPID対応状況も要確認です")
+
+    if speed.get("count", 0) >= 3 and speed.get("max") == 0:
+        add_comment("参考: SPEEDがすべて0のため、停止中心ログの可能性があります")
+    elif row_count > 0 and speed.get("missing", 0) >= max(2, row_count // 2):
+        add_comment("参考: SPEEDの取得が限定的です。車速信号や通信条件差も参考確認してください")
+
+    if iat.get("count", 0) and (iat.get("avg", 0) < -20 or iat.get("avg", 0) > 60):
+        add_comment("参考: IATが不自然寄りに見えます。吸気温センサー値も要確認です")
+
+    if log_type.get("label") == "停止中心ログ" and thr.get("count", 0) and thr.get("avg", 0) > 20:
+        add_comment("参考: 停止中心としてはTHROTTLEが高めです。操作条件差も含めて確認してください")
+
+    if missing_info["many_missing"]:
+        add_comment(f"参考: 未取得が多い項目があります ({', '.join(missing_info['many_missing'])})")
+
+    if row_count < 5 and comments:
+        add_comment("参考: サンプル数が少なめのため、上記は傾向確認として見てください")
+
+    return comments[:5]
+
+
 def build_live_csv_comments(summary):
     comments = []
     rpm = summary.get("rpm", {})
@@ -434,6 +490,7 @@ def analyze_live_csv(csv_path):
         "thr": summarize_live_csv_column(rows, "thr"),
     }
     summary["log_type"] = classify_live_log_type(summary)
+    summary["anomalies"] = build_live_anomaly_comments(summary)
     summary["comments"] = build_live_csv_comments(summary)
     return summary
 
@@ -474,6 +531,12 @@ def print_live_csv_analysis(summary):
     print("簡易コメント:")
     for line in summary.get("comments", []):
         print(f"- {line}")
+    anomalies = summary.get("anomalies", [])
+    if anomalies:
+        print("")
+        print("[ライブ異常検出]")
+        for line in anomalies:
+            print(f"- {line}")
 
 
 WMI_TO_MAKER = load_json("wmi_map.json", {})
